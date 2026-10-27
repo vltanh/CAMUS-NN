@@ -32,13 +32,16 @@ root. Each has 16 taxa including `OUT`, 1,000 IQ-TREE gene trees, and an ASTRAL 
 camus-nn --method orig --genes examples/validation/genes.nwk \
   --guide examples/validation/guide.nwk --out out-val-camus
 
-camus-nn --method lqf --genes examples/validation/genes.nwk \
+camus-nn --method lqf --model models/all-frequency.json \
+  --genes examples/validation/genes.nwk \
   --guide examples/validation/guide.nwk --out out-val-lqf
 
-camus-nn --method lqw --genes examples/test/genes.nwk \
+camus-nn --method lqw --model models/all-frequency.json \
+  --genes examples/test/genes.nwk \
   --guide examples/test/guide.nwk --out out-test-lqw
 
-camus-nn --method lqw --iterate --max-guide-runs 5 \
+camus-nn --method lqw --model models/all-frequency.json \
+  --iterate --max-guide-runs 5 \
   --genes examples/validation/genes.nwk \
   --guide examples/validation/guide.nwk --out out-val-iter
 ```
@@ -48,8 +51,13 @@ returned candidate curve in `network.csv`, `prediction.json`, and logs.
 Iteration adds `iteration.json` and each trial's guide, curve, and score
 under `trials/`. Temporary count/evidence tables are removed after processes stop.
 
+LQF and LQW need a trained model. The examples explicitly select the included
+`models/all-frequency.json`, which is also the default when `--model` is omitted.
+
 Original CAMUS uses its count-based quartet filter (mode 2, threshold 0.5)
 and the C++ search. It does not load or apply the neural network.
+
+**Inputs and method**
 
 | Argument | Meaning and default |
 | --- | --- |
@@ -58,20 +66,44 @@ and the C++ search. It does not load or apply the neural network.
 | `--out DIR` | Required. A fresh output directory that must not already exist. |
 | `--method {orig,lqf,lqw}` | Original CAMUS or a learned method. Default: `lqw`. |
 | `--model FILE` | Trained NN JSON for LQF/LQW. Default: the bundled `models/all-frequency.json`. Unused by original CAMUS. |
+
+<details>
+<summary>Click to show quartet sampling options</summary>
+
+| Argument | Meaning and default |
+| --- | --- |
 | `--sampler {all,rooted,uniform,eu,ew}` | Default: `all` (every quartet). `rooted` uses every quartet containing `OUT` once; `uniform` samples quartet sets globally; `eu` (edge-uniform) and `ew` (edge-walk) sample around guide edges. |
 | `--multiplicity N` | Positive sampling budget multiplier for `uniform`, `eu`, and `ew`: total draws equal `N` times the number of unrooted guide edges, including leaf edges. Default: `50`. Repeated draws contribute repeatedly. |
 | `--seed INTEGER` | Deterministic sampling seed. Default: `42`. |
 | `--case ID` | Case identity combined with the seed to determine sampling. Default: `single-case`. |
-| `--threads N` | Positive C++ counting/search thread count. Default: `1`. |
-| `--batch-rows N` | Positive rows per NN prediction/evidence batch; smaller batches reduce preprocessing memory. Default: `65536`. |
+
+</details>
+
+<details>
+<summary>Click to show LQW iteration and search options</summary>
+
+| Argument | Meaning and default |
+| --- | --- |
 | `--iterate` | Enable single-cycle guide refinement for LQW. Sampling and learned evidence remain fixed across solves. |
 | `--max-guide-runs N` | Positive solve budget for iteration, including the initial solve. Default: `5`. |
 | `--max-rounds N` | Nonnegative outer switching-pass limit for iteration. Default: `10`; `0` keeps the initial solve. |
 | `--inner-solver {per-k-stopping,overall}` | Default: `per-k-stopping` (heuristic early stopping). `overall` selects exact inner optimization and requires `--iterate`. |
 | `--search-cap K` | Nonnegative maximum reticulations in every LQW solve. Default: uncapped. |
+
+</details>
+
+<details>
+<summary>Click to show runtime and executable options</summary>
+
+| Argument | Meaning and default |
+| --- | --- |
+| `--threads N` | Positive C++ counting/search thread count. Default: `1`. |
+| `--batch-rows N` | Positive rows per NN prediction/evidence batch; smaller batches reduce preprocessing memory. Default: `65536`. |
 | `--timeout SECONDS` | Total time limit for counting, preprocessing, and all solves. Must be positive and at most `86400`; default: `86400`. |
 | `--bin-dir DIR` | Directory containing `camus-count` and `camus-native`. Default: bundled executables. |
 | `-h, --help` | Show usage and argument descriptions. |
+
+</details>
 
 Gene trees and guide must have matching taxa. Branch lengths are ignored.
 Any positive number of loci is supported: the NN uses normalized quartet
@@ -92,14 +124,24 @@ displayed by the supplied true network. The example contains one separate
 training case with 26 taxa and 1,000 IQ-TREE gene trees.
 See [input formats](#input-formats) for the case-list and table structures.
 
+**Inputs and output**
+
 | Argument | Meaning and default |
 | --- | --- |
 | `--training-cases FILE` | Required. JSON case list with `case`, `network`, and `genes` fields. |
 | `--output-table FILE` | Required. New labeled quartet CSV; the destination must not exist. |
+
+<details>
+<summary>Click to show counting and labeling options</summary>
+
+| Argument | Meaning and default |
+| --- | --- |
 | `--threads N` | Positive C++ counting thread count. Default: `1`. |
 | `--max-switchings N` | Positive limit on exact parent-choice switchings per true network. Default: `4096`. Increase it to label networks requiring more switchings. |
 | `--bin-dir DIR` | Directory containing `camus-count`. Default: bundled executable. |
 | `-h, --help` | Show usage and argument descriptions. |
+
+</details>
 
 ## Training
 
@@ -126,17 +168,35 @@ camus-nn --method lqw --model out-training/model.json \
 
 Choose exactly one of the two input arguments.
 
+**Training inputs and output**
+
 | Argument | Meaning and default |
 | --- | --- |
 | `--quartet-table FILE [FILE ...]` | One or more labeled training CSVs. Input files must be distinct. |
 | `--training-cases FILE` | JSON list of true networks and gene trees; count and label their quartets before fitting. |
 | `--output-model FILE` | Required. New trained NN JSON; the destination must not exist. |
+
+<details>
+<summary>Click to show model fitting options</summary>
+
+| Argument | Meaning and default |
+| --- | --- |
 | `--seed INTEGER` | Nonnegative seed for NN initialization. Default: `42`. |
 | `--hidden-width N` | Positive number of ReLU hidden units. Default: `8`. |
+
+</details>
+
+<details>
+<summary>Click to show preprocessing and runtime options</summary>
+
+| Argument | Meaning and default |
+| --- | --- |
 | `--threads N` | Positive counting thread count with `--training-cases`. Default: `1`. |
 | `--max-switchings N` | Positive exact-labeling budget per network with `--training-cases`. Default: `4096`. |
 | `--bin-dir DIR` | Directory containing `camus-count` for `--training-cases`. Default: bundled executable. |
 | `-h, --help` | Show usage and argument descriptions. |
+
+</details>
 
 Fitting uses float64 multilabel cross-entropy, L-BFGS-B, and weight penalty
 `1e-4`. Each network receives equal total weight, frequency-rank ties are
