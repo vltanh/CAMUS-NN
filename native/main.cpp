@@ -8,7 +8,8 @@ namespace camus {
 
 struct Options{
     std::string tree,input,prefix="camus-cpp",dump;
-    int threads=1,cap=-1;
+    int threads=1,cap=-1,mode=0;
+    double threshold=.5;
     bool grouped=false,weighted=false,signed_weights=false,stop=true,scalar=false,anchored=false;
 };
 
@@ -59,7 +60,7 @@ Options options(int argc,char** argv){
         if(equal!=std::string::npos){value=key.substr(equal+1);key.resize(equal);}
         auto boolean=[&](){if(equal==std::string::npos)return true;if(value=="true")return true;if(value=="false")return false;throw std::runtime_error("Invalid boolean flag");};
         if(key=="-h"||key=="--help"){
-            std::cout<<"camus-native [-n threads] [-q 0] [-o prefix]\n"
+            std::cout<<"camus-native [-n threads] [-q 0|1|2] [-t threshold] [-o prefix]\n"
                        "          [-grouped-counts | -quartet-weights -signed-weights]\n"
                        "          [-signed-weights] [-signed-max-reticulations -1|cap]\n"
                        "          [-signed-stop-on-plateau=false]\n"
@@ -76,7 +77,11 @@ Options options(int argc,char** argv){
         if(!key.empty()&&key[0]=='-'){
             if(equal==std::string::npos){if(++i>=argc)throw std::runtime_error("Missing value for "+key);value=argv[i];}
             if(key=="-n")o.threads=std::stoi(value);
-            else if(key=="-q"){if(value!="0")throw std::runtime_error("Learned evidence requires -q 0");}
+            else if(key=="-q"){
+                if(value!="0"&&value!="1"&&value!="2")throw std::runtime_error("Quartet filter must be 0, 1 or 2");
+                o.mode=std::stoi(value);
+            }
+            else if(key=="-t")o.threshold=parse_weight(value);
             else if(key=="-o")o.prefix=value;
             else if(key=="-signed-max-reticulations")o.cap=std::stoi(value);
             else if(key=="--dump-edge-scores")o.dump=value;
@@ -85,9 +90,10 @@ Options options(int argc,char** argv){
     }
     if(positional.size()!=2)throw std::runtime_error("Require a rooted constraint tree and evidence file");
     o.tree=std::filesystem::absolute(positional[0]);o.input=std::filesystem::absolute(positional[1]);
-    if(o.threads<1||o.cap< -1)throw std::runtime_error("Invalid inference options");
+    if(o.threads<1||o.cap< -1||o.threshold<0||o.threshold>1)throw std::runtime_error("Invalid inference options");
     if(o.grouped==o.weighted || o.weighted!=o.signed_weights)
-        throw std::runtime_error("Choose learned grouped counts or signed quartet weights");
+        throw std::runtime_error("Choose grouped counts or signed quartet weights");
+    if(o.weighted&&o.mode)throw std::runtime_error("Quartet filtering requires grouped counts");
     if(o.scalar&&(!o.signed_weights||o.cap!=-1))throw std::runtime_error("Unrestricted DP requires signed weights and no reticulation cap");
     if(o.scalar)o.anchored=true;
     return o;
@@ -112,11 +118,11 @@ template<class Value>void run(const Options& o,Log& log){
             if(tree.nodes[c].children.empty()&&tree.nodes[c].name=="OUT")out=true;
         if(!out)throw std::runtime_error("Anchored inference requires leaf OUT as a root child");
     }
-    log.message("reading learned quartet evidence");
+    log.message("reading quartet evidence");
     Evidence<Value> evidence=read_evidence<Value>(o.input,tree,o.grouped,o.signed_weights);
     log.finish("counting_or_evidence_reading");
     bool total_objective=o.signed_weights&&o.anchored;
-    evidence.filter(tree,total_objective);
+    evidence.filter(tree,o.mode,o.threshold,total_objective);
     log.message(std::to_string(evidence.size())+" quartet topologies not in the constraint tree");
     log.finish("filtering");
     log.message(o.weighted?"calculating weighted edge scores":"calculating edge scores");

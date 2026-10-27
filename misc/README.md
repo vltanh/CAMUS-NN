@@ -8,6 +8,32 @@ Inputs are gene trees (one complete Newick per line) and a supplied starting
 tree in Newick, with matching taxon labels. The examples use the included
 IQ-TREE gene trees and ASTRAL guide. Choose a new output directory for every run.
 
+## Original CAMUS
+
+```bash
+python misc/camus_original.py \
+  --gene-trees examples/validation/genes.nwk \
+  --starting-tree examples/validation/guide.nwk \
+  --output-directory out-camus-original
+```
+
+This runs original CAMUS with the included C++ implementation, using every
+quartet, filter mode 2, and threshold 0.5. The NN is unused. The runner calls
+`camus-nn --method orig` and saves `network.nwk`, the full candidate curve in
+`network.csv`, `prediction.json`, native metrics, and logs.
+
+| Argument | Meaning and default |
+| --- | --- |
+| `--gene-trees FILE` | Required. Gene trees, one Newick per line. |
+| `--starting-tree FILE` | Required. Binary guide Newick with `OUT` directly under the root. |
+| `--output-directory DIR` | Required. Fresh output directory. |
+| `--threads N` | Positive C++ counting/search thread count. Default: `1`. |
+| `--timeout SECONDS` | Whole-run limit in `(0, 86400]`. Default: `86400`. |
+| `-h, --help` | Show usage and argument descriptions. |
+
+For All, Rooted, Uniform, EU, or EW quartet sampling, use the package CLI's
+`--sampler` argument with `--method orig`; see the [inference options](../README.md#inference).
+
 ## BROOQS and TOB-QMC
 
 Estimate a tree of blobs (ToB) from the supplied guide, then resolve it with

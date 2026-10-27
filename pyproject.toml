@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "camus-nn"
 version = "0.1.0"
-description = "Learned quartet filtering, signed weighting, and iterative C++ network inference"
+description = "Original CAMUS, learned quartet filtering, and iterative C++ network inference"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}

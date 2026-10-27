@@ -144,6 +144,32 @@ class SwitchingTests(unittest.TestCase):
 
 @unittest.skipUnless((BIN / 'camus-native').is_file() and (BIN / 'camus-count').is_file(), 'Install the package first')
 class NativeTests(unittest.TestCase):
+    def test_original_filter_tie_order_and_strict_threshold(self):
+        # Channels are AB|CD, AC|BD, AD|BC. At a tie, later channels win.
+        examples = [
+            ((4, 4, 4), '001'),
+            ((9, 2, 2), '100'),
+            ((8, 1, 3), '100'),  # Gap equals 0.5 times the two minor counts: reject.
+            ((8, 1, 4), '101'),  # Gap strictly exceeds the threshold: retain both.
+            ((4, 1, 4), '101'),
+            ((3, 2, 3), '001'),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'filter.cpp'
+            source.write_text('#include "engine.hpp"\n#include <iostream>\n'
+                'int main(int argc,char** argv){for(int i=1;i<argc;i+=3){'
+                'std::array<uint32_t,3> counts{uint32_t(std::stoul(argv[i+2])),'
+                'uint32_t(std::stoul(argv[i+1])),uint32_t(std::stoul(argv[i]))};'
+                'auto keep=camus::retained_counts(counts,2,.5);'
+                'std::cout<<keep[2]<<keep[1]<<keep[0]<<"\\n";}}\n')
+            binary = root / 'filter'
+            subprocess.run([os.environ.get('CXX', 'g++'), '-O2', '-std=c++17', '-fopenmp',
+                '-I', str(ROOT / 'native'), str(source), '-o', str(binary)], check=True, capture_output=True)
+            actual = subprocess.check_output([str(binary),
+                *[str(value) for counts, _ in examples for value in counts]], text=True)
+            self.assertEqual(actual.splitlines(), [expected for _, expected in examples])
+
     def test_direct_network_training_labels_network_weights_and_taxa_validation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -263,16 +289,19 @@ class NativeTests(unittest.TestCase):
             genes.write_text(guide.read_text() * 6 + '(OUT,((A,(B,C)),(D,(E,F))));\n' * 4)
             common = [sys.executable, '-B', '-m', 'camus_nn.infer', '--genes', str(genes),
                       '--guide', str(guide), '--bin-dir', str(BIN)]
-            options = [('lqf', []), ('lqw', []), ('iterate', ['--iterate']),
+            options = [('orig', ['--model', str(root / 'no-model.json')]),
+                       ('lqf', []), ('lqw', []), ('iterate', ['--iterate']),
                        ('cap', ['--iterate', '--search-cap', '1']),
                        ('overall', ['--iterate', '--inner-solver', 'overall']),
                        ('zero', ['--iterate', '--search-cap', '0'])]
             for name, extra in options:
                 output = root / name
-                result = subprocess.run([*common, '--method', 'lqf' if name == 'lqf' else 'lqw',
+                method = name if name in ('orig', 'lqf') else 'lqw'
+                result = subprocess.run([*common, '--method', method,
                     '--out', str(output), *extra], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr + (output / 'run.log').read_text())
                 prediction = json.loads((output / 'prediction.json').read_text())
+                self.assertEqual(prediction['model_used'], name != 'orig')
                 validate_network(parse_network(prediction['network']), level1=True)
                 self.assertFalse((output / 'tmp').exists())
                 if name in ('iterate', 'cap', 'overall', 'zero'):

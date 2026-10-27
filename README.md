@@ -1,8 +1,9 @@
 # CAMUS-NN
 
-CAMUS-NN provides training and C++ inference for **CAMUS-LQF**, **CAMUS-LQW**,
-and iterative CAMUS-LQW. Both methods use the included frequency-only neural
-network: three inputs, eight ReLU hidden units, and three membership outputs.
+CAMUS-NN provides C++ inference for **original CAMUS**, **CAMUS-LQF**,
+**CAMUS-LQW**, and iterative CAMUS-LQW, plus training for the learned methods.
+LQF and LQW use the included frequency-only neural network: three inputs,
+eight ReLU hidden units, and three membership outputs.
 
 ## Install
 
@@ -28,6 +29,9 @@ Run the included validation and held-out test examples from the repository
 root. Each has 16 taxa including `OUT`, 1,000 IQ-TREE gene trees, and an ASTRAL guide.
 
 ```bash
+camus-nn --method orig --genes examples/validation/genes.nwk \
+  --guide examples/validation/guide.nwk --out out-val-camus
+
 camus-nn --method lqf --genes examples/validation/genes.nwk \
   --guide examples/validation/guide.nwk --out out-val-lqf
 
@@ -44,13 +48,16 @@ returned candidate curve in `network.csv`, `prediction.json`, and logs.
 Iteration adds `iteration.json` and each trial's guide, curve, and score
 under `trials/`. Temporary count/evidence tables are removed after processes stop.
 
+Original CAMUS uses its count-based quartet filter (mode 2, threshold 0.5)
+and the C++ search. It does not load or apply the neural network.
+
 | Argument | Meaning and default |
 | --- | --- |
 | `--genes FILE` | Required. Gene trees, one Newick tree per line. |
 | `--guide FILE` | Required. Binary guide Newick with leaf `OUT` directly under the root. |
 | `--out DIR` | Required. A fresh output directory that must not already exist. |
-| `--method {lqf,lqw}` | Inference method. Default: `lqw`. |
-| `--model FILE` | Trained NN JSON. Default: the bundled `models/all-frequency.json`. |
+| `--method {orig,lqf,lqw}` | Original CAMUS or a learned method. Default: `lqw`. |
+| `--model FILE` | Trained NN JSON for LQF/LQW. Default: the bundled `models/all-frequency.json`. Unused by original CAMUS. |
 | `--sampler {all,rooted,uniform,eu,ew}` | Default: `all` (every quartet). `rooted` uses every quartet containing `OUT` once; `uniform` samples quartet sets globally; `eu` (edge-uniform) and `ew` (edge-walk) sample around guide edges. |
 | `--multiplicity N` | Positive sampling budget multiplier for `uniform`, `eu`, and `ew`: total draws equal `N` times the number of unrooted guide edges, including leaf edges. Default: `50`. Repeated draws contribute repeatedly. |
 | `--seed INTEGER` | Deterministic sampling seed. Default: `42`. |
@@ -195,8 +202,8 @@ CSV trainer.
 
 ## Other inference methods
 
-The [misc scripts](misc/README.md) run BROOQS with TOB-QMC, SNaQ, and
-PhyloNet-MPL. Each script includes installation commands for the versions used;
+The [misc scripts](misc/README.md) run original CAMUS, BROOQS with TOB-QMC,
+SNaQ, and PhyloNet-MPL. Each script includes installation commands for the versions used;
 the linked guide gives runnable examples and explains every argument.
 
 ## Tests

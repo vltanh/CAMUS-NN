@@ -1,4 +1,4 @@
-"""Stream model predictions and learned evidence in bounded batches."""
+"""Stream count evidence and model predictions in bounded batches."""
 import csv
 from itertools import islice
 
@@ -25,8 +25,8 @@ def membership(counts, model):
 
 
 def write_evidence(source, destination, model, method, taxa, *, multiplicities=None, batch_rows=65536):
-    if method not in ('lqf', 'lqw') or batch_rows < 1:
-        raise ValueError('Require lqf or lqw and a positive batch size')
+    if method not in ('orig', 'lqf', 'lqw') or batch_rows < 1:
+        raise ValueError('Require orig, lqf or lqw and a positive batch size')
     total = 0
     previous = -1
     ids = {name: i for i, name in enumerate(sorted(taxa))}
@@ -53,7 +53,7 @@ def write_evidence(source, destination, model, method, taxa, *, multiplicities=N
             loci = np.array([int(r['n_loci']) for r in rows], dtype=np.int64)
             if np.any(counts.sum(axis=1) > loci) or np.any(loci < 1):
                 raise ValueError('Counts exceed locus coverage')
-            p = membership(counts, model)
+            p = membership(counts, model) if method != 'orig' else None
             draws = np.array([multiplicities[g] for g in groups]) if multiplicities is not None else 1
             if method == 'lqw':
                 weights = (2 * p - 1) * ((loci * draws) / 1000)[:, None]
@@ -62,7 +62,8 @@ def write_evidence(source, destination, model, method, taxa, *, multiplicities=N
                         if value != 0:
                             writer.writerow([group[i] for i in order] + [float(value)])
             else:
-                keep = ((p > .5) & (counts > 0)).astype(int)
+                # Original CAMUS applies its count filter inside the C++ core.
+                keep = np.ones_like(counts) if method == 'orig' else ((p > .5) & (counts > 0)).astype(int)
                 counts = counts * (draws[:, None] if multiplicities is not None else 1)
                 loci = loci * draws
                 for r, group, c, n, mask in zip(rows, groups, counts, loci, keep):

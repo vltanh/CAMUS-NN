@@ -1,4 +1,4 @@
-"""Run C++ CAMUS-LQF or CAMUS-LQW, optionally with switching iterations."""
+"""Run original CAMUS, CAMUS-LQF or CAMUS-LQW with the C++ core."""
 import argparse
 from collections import Counter
 import csv
@@ -42,15 +42,12 @@ def choose(path, method, *, iterative=False):
 
 
 def worker(output):
-    import torch
     from .evidence import write_evidence
-    from .io import load_model
     from .iterate import anchored_tree, refine
     from .sampling import sample_quartets
 
     config = json.loads((output / 'tmp/config.json').read_text())
     files = config['files']
-    torch.set_num_threads(1)
     tree = anchored_tree(Path(files['guide']).read_text())
     # Normalize annotation-free topology once, preserving child encounter order.
     guide = output / 'guide.nwk'
@@ -78,17 +75,25 @@ def worker(output):
         subprocess.run(argv, stdout=log, stderr=subprocess.STDOUT, check=True)
     phases['sampling_and_counting'] = time.monotonic() - began
     start = time.monotonic()
-    model = load_model(files['model'])
+    model = None
+    if config['method'] != 'orig':
+        import torch
+        from .io import load_model
+        torch.set_num_threads(1)
+        model = load_model(files['model'])
     evidence = temporary / 'evidence.csv'
     rows = write_evidence(counts, evidence, model, config['method'], tree.tips,
                           multiplicities=multiplicities, batch_rows=config['batch_rows'])
     if sampler == 'all' and rows != math.comb(len(tree.tips), 4):
         raise ValueError('All requires observed resolved counts for every quartet of guide taxa')
-    phases['model_and_evidence'] = time.monotonic() - start
+    phase = 'count_evidence' if config['method'] == 'orig' else 'model_and_evidence'
+    phases[phase] = time.monotonic() - start
     cap = config['search_cap']
 
     def solve(current_guide, directory, iterative=False):
-        if config['method'] == 'lqf':
+        if config['method'] == 'orig':
+            flags = ['-q', '2', '-t', '.5', '-grouped-counts']
+        elif config['method'] == 'lqf':
             flags = ['-q', '0', '-grouped-counts']
         else:
             flags = ['-q', '0', '-quartet-weights', '-signed-weights']
@@ -119,7 +124,7 @@ def worker(output):
     phases['native_search_and_iterations'] = time.monotonic() - start
     (output / 'network.nwk').write_text(result['network'] + '\n')
     save(output / 'prediction.json', dict(**result, method=config['method'], sampler=config['sampler'],
-        search_cap=cap, quartet_groups=rows,
+        search_cap=cap, quartet_groups=rows, model_used=config['method'] != 'orig',
         quartet_draws=sum(multiplicities.values()) if multiplicities is not None else rows,
         truth_used_for_inference=False, phases=phases))
 
@@ -132,8 +137,8 @@ def main():
     parser.add_argument('--genes', type=Path, required=True, help='Gene-tree file: one Newick per line')
     parser.add_argument('--guide', type=Path, required=True, help='Binary guide Newick; OUT is a root child')
     parser.add_argument('--out', type=Path, required=True, help='Fresh output directory; must not exist')
-    parser.add_argument('--method', choices=('lqf', 'lqw'), default='lqw', help='Inference method (default: lqw)')
-    parser.add_argument('--model', type=Path, default=DEFAULT_MODEL, help='Trained model JSON (default: bundled NN)')
+    parser.add_argument('--method', choices=('orig', 'lqf', 'lqw'), default='lqw', help='Original CAMUS or a learned method (default: lqw)')
+    parser.add_argument('--model', type=Path, default=DEFAULT_MODEL, help='Trained model for lqf/lqw (default: bundled NN; unused by orig)')
     parser.add_argument('--bin-dir', type=Path, default=DEFAULT_BIN_DIR, help='Directory with camus-count and camus-native (default: bundled)')
     parser.add_argument('--sampler', choices=('all', 'rooted', 'uniform', 'eu', 'ew'), default='all', help='Quartet sampling strategy (default: all)')
     parser.add_argument('--case', default='single-case', help='Case ID combined with seed for sampling (default: single-case)')
@@ -157,8 +162,11 @@ def main():
         parser.error('--inner-solver overall requires --iterate')
     from .iterate import anchored_tree
     anchored_tree(args.guide.read_text())
-    files = {name: str(path.resolve(strict=True)) for name, path in dict(genes=args.genes, guide=args.guide,
-        model=args.model, binary=args.bin_dir / 'camus-native', counter=args.bin_dir / 'camus-count').items()}
+    inputs = dict(genes=args.genes, guide=args.guide,
+                  binary=args.bin_dir / 'camus-native', counter=args.bin_dir / 'camus-count')
+    if args.method != 'orig':
+        inputs['model'] = args.model
+    files = {name: str(path.resolve(strict=True)) for name, path in inputs.items()}
     output = args.out.resolve()
     output.mkdir(parents=True, exist_ok=False)
     (output / 'tmp').mkdir()

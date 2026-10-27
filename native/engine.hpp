@@ -162,6 +162,18 @@ inline double parse_weight(std::string_view text){
     return value;
 }
 
+inline std::array<bool,3> retained_counts(const std::array<uint32_t,3>& values,int mode,double threshold){
+    std::array<bool,3> retained{true,true,true};if(!mode)return retained;
+    // Preserve the original topology encounter order when counts tie.
+    std::array<int,3> rank{2,1,0};
+    std::stable_sort(rank.begin(),rank.end(),[&](int a,int b){return values[a]<values[b];});
+    uint32_t sum=values[rank[0]]+values[rank[1]];
+    bool keep=uint32_t(threshold*double(sum))<values[rank[1]]-values[rank[0]];
+    if(!keep)retained[rank[0]]=retained[rank[1]]=false;
+    else if(mode==2)retained[rank[0]]=false;
+    return retained;
+}
+
 template<class Value>struct Entry{uint64_t q;Value value;};
 template<class Value>struct Evidence{
     std::array<std::vector<Entry<Value>>,3> records;
@@ -201,7 +213,25 @@ template<class Value>struct Evidence{
         }
         if constexpr(std::is_same_v<Value,double>)if(std::isinf(total))throw std::runtime_error("Total quartet weight is not finite");
     }
-    void filter(const Tree& tree,bool score_guide=false){
+    void filter(const Tree& tree,int mode=0,double threshold=.5,bool score_guide=false){
+        if constexpr(std::is_same_v<Value,uint32_t>){
+            if(mode){
+                std::array<size_t,3> at{},write{};
+                while(true){
+                    uint64_t group=UINT64_MAX;
+                    for(int c=0;c<3;++c)if(at[c]<records[c].size())group=std::min(group,records[c][at[c]].q&taxa_mask);
+                    if(group==UINT64_MAX)break;
+                    std::array<uint32_t,3> values{};std::array<bool,3> present{};
+                    for(int c=0;c<3;++c)if(at[c]<records[c].size()&&(records[c][at[c]].q&taxa_mask)==group){values[c]=records[c][at[c]].value;present[c]=true;}
+                    auto retained=retained_counts(values,mode,threshold);
+                    for(int c=0;c<3;++c)if(present[c]){
+                        auto entry=records[c][at[c]++];
+                        if(retained[c])records[c][write[c]++]=entry;
+                    }
+                }
+                for(int c=0;c<3;++c)records[c].resize(write[c]);
+            }
+        }
         double guide_sum=0,guide_correction=0;
         for(int c=0;c<3;++c){
             auto& entries=records[c];size_t write=0;
