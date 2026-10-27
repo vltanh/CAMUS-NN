@@ -19,6 +19,7 @@ from camus_nn.infer import DEFAULT_BIN_DIR
 from camus_nn.iterate import refine, switching_guides
 from camus_nn.sampling import sample_quartets
 from camus_nn.topology import Tree, parse_network, validate_network
+from camus_nn.prepare import displayed_memberships, prepare_training_csv, read_cases
 from camus_nn.train import training_arrays
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,7 +66,7 @@ class ModelTests(unittest.TestCase):
             np.testing.assert_array_equal(membership(counts * multiplier, self.model), expected)
 
     def test_training_network_weights_and_split_rejection(self):
-        x, y, weights, cases = training_arrays([ROOT / 'examples/train.csv'])
+        x, y, weights, cases = training_arrays([ROOT / 'tests/fixtures/training-rows.csv'])
         self.assertEqual(cases, ['reticulate', 'single'])
         np.testing.assert_allclose(x.sum(axis=1), 1)
         self.assertAlmostEqual(weights.sum(), 12)
@@ -74,9 +75,17 @@ class ModelTests(unittest.TestCase):
         self.assertAlmostEqual(weights[(y.sum(axis=1) == 2)].sum(), 6)
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'leak.csv'
-            path.write_text((ROOT / 'examples/train.csv').read_text().replace(',train,', ',test,', 1))
+            path.write_text((ROOT / 'tests/fixtures/training-rows.csv').read_text().replace(',train,', ',test,', 1))
             with self.assertRaisesRegex(ValueError, 'only labeled training'):
                 training_arrays([path])
+
+    def test_truth_membership_channels_and_exact_labeling_budget(self):
+        groups = [('A', 'B', 'C', 'OUT')]
+        np.testing.assert_array_equal(displayed_memberships(parse_network(ONE), groups), [[1, 0, 1]])
+        tree = parse_network('(OUT,((A,B),C));')
+        np.testing.assert_array_equal(displayed_memberships(tree, groups), [[1, 0, 0]])
+        with self.assertRaisesRegex(ValueError, 'max-switchings'):
+            displayed_memberships(parse_network(ONE), groups, max_switchings=1)
 
     def test_repeated_draws_change_evidence_without_changing_features(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -135,6 +144,68 @@ class SwitchingTests(unittest.TestCase):
 
 @unittest.skipUnless((BIN / 'camus-native').is_file() and (BIN / 'camus-count').is_file(), 'Install the package first')
 class NativeTests(unittest.TestCase):
+    def test_direct_network_training_labels_network_weights_and_taxa_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            network = root / 'network.nwk'
+            network.write_text(ONE)
+            genes = root / 'genes.nwk'
+            genes.write_text('(OUT,((A,B),C));\n' * 2 + '(OUT,(A,(B,C)));\n')
+            tree = root / 'tree.nwk'
+            tree.write_text('(OUT,((A,B),(C,D)));')
+            tree_genes = root / 'tree-genes.nwk'
+            tree_genes.write_text(tree.read_text() + '\n')
+            manifest = root / 'cases.json'
+            manifest.write_text(json.dumps([
+                dict(case='0', network=network.name, genes=genes.name),
+                dict(case='1', network=tree.name, genes=tree_genes.name)]))
+            table = root / 'training.csv'
+            self.assertEqual(prepare_training_csv(manifest, table, counter=BIN / 'camus-count'), 6)
+            x, y, weights, cases = training_arrays([table])
+            self.assertEqual(cases, ['0', '1'])
+            np.testing.assert_array_equal(x[0], [2/3, 1/3, 0])
+            np.testing.assert_array_equal(y[0], [1, 1, 0])
+            self.assertAlmostEqual(weights[y.sum(axis=1) == 2].sum(), 3)
+            self.assertAlmostEqual(weights[y.sum(axis=1) == 1].sum(), 3)
+            with self.assertRaises(FileExistsError):
+                prepare_training_csv(manifest, table, counter=BIN / 'camus-count')
+            manifest.write_text(json.dumps([
+                dict(case='same', network=network.name, genes=genes.name),
+                dict(case='same', network=tree.name, genes=tree_genes.name)]))
+            with self.assertRaisesRegex(ValueError, 'distinct'):
+                read_cases(manifest)
+            manifest.write_text(json.dumps([dict(case='val', split='val', network=network.name, genes=genes.name)]))
+            with self.assertRaisesRegex(ValueError, 'split must be train'):
+                read_cases(manifest)
+            tree.write_text('(OUT,((A,B),(C,((D)#H1,#H1))));')
+            manifest.write_text(json.dumps([dict(case='tree', network=tree.name, genes=tree_genes.name)]))
+            parallel = root / 'parallel.csv'
+            prepare_training_csv(manifest, parallel, counter=BIN / 'camus-count')
+            _, labels, _, _ = training_arrays([parallel])
+            self.assertTrue(np.all(labels.sum(axis=1) == 1))
+            genes.write_text('(OUT,((A,B),D));\n')
+            manifest.write_text(json.dumps([dict(case='bad', network=network.name, genes=genes.name)]))
+            invalid = root / 'invalid.csv'
+            with self.assertRaisesRegex(ValueError, 'same taxa'):
+                prepare_training_csv(manifest, invalid, counter=BIN / 'camus-count')
+            self.assertFalse(invalid.exists())
+            self.assertFalse(invalid.with_suffix('.csv.partial').exists())
+
+    def test_csv_and_json_training_modes_save_identical_models(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'network.nwk').write_text(ONE)
+            (root / 'genes.nwk').write_text('(OUT,((A,B),C));\n' * 2 + '(OUT,(A,(B,C)));\n')
+            manifest = root / 'cases.json'
+            manifest.write_text(json.dumps([dict(case='example', network='network.nwk', genes='genes.nwk')]))
+            table = root / 'training.csv'
+            subprocess.run([sys.executable, '-m', 'camus_nn.prepare', '--training-cases', str(manifest),
+                            '--output-table', str(table), '--bin-dir', str(BIN)], check=True, capture_output=True)
+            for mode, source in [('quartet-table', table), ('training-cases', manifest)]:
+                subprocess.run([sys.executable, '-m', 'camus_nn.train', '--' + mode, str(source),
+                    '--output-model', str(root / f'{mode}.json'), '--bin-dir', str(BIN)], check=True, capture_output=True)
+            self.assertEqual((root / 'quartet-table.json').read_bytes(), (root / 'training-cases.json').read_bytes())
+
     def test_serializer_preserves_reference_hybrid_ids_above_twelve_cycles(self):
         fixture = json.loads((ROOT / 'tests/fixtures/serializer-14-reticulations.json').read_text())
         with tempfile.TemporaryDirectory() as tmp:

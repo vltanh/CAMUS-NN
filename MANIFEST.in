@@ -1,6 +1,7 @@
 include LICENSE
 recursive-include models *.json
 recursive-include native *.cpp *.hpp LICENSE *-LICENSE
-recursive-include examples *.csv *.nwk
+recursive-include examples *.csv *.nwk *.json
 recursive-include tests *.py
 recursive-include tests/fixtures *.json
+recursive-include tests/fixtures *.csv

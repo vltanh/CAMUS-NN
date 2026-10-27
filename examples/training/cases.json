@@ -1,0 +1,7 @@
+[
+  {
+    "case": "training-example",
+    "network": "network.nwk",
+    "genes": "genes.nwk"
+  }
+]

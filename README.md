@@ -1,108 +1,201 @@
 # CAMUS-NN
 
-Training and C++ inference for **CAMUS-LQF**, **CAMUS-LQW**, and iterative
-CAMUS-LQW. Both methods use the same included, trained frequency-only neural
+CAMUS-NN provides training and C++ inference for **CAMUS-LQF**, **CAMUS-LQW**,
+and iterative CAMUS-LQW. Both methods use the included frequency-only neural
 network: three inputs, eight ReLU hidden units, and three membership outputs.
 
 ## Install
 
-Requires Linux and Python 3.11+. Installing from source requires a C++17 compiler
-with OpenMP support (GCC 11+). Installation builds and bundles the native programs
-and trained NN automatically.
+Requires Linux, Python 3.11+, and a C++17 compiler with OpenMP support
+(GCC 11+). Installation builds the native programs and bundles the trained NN.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
 
 ```bash
 git clone https://github.com/vltanh/CAMUS-NN.git
 cd CAMUS-NN
-python -m pip install .
+uv venv --python 3.11
+source .venv/bin/activate
+uv pip install --torch-backend=cpu '.[train]'
 ```
 
-For training support, install `python -m pip install '.[train]'`.
+The `train` extra includes fitting support and pins the library versions used
+for the included NN. Use `uv pip install --torch-backend=cpu .` for inference
+and preprocessing. Pip also supports `python -m pip install '.[train]'`.
 
 ## Inference
 
-The examples contain one validation and one held-out test case, each with
-16 taxa (including `OUT`), 1,000 IQ-TREE gene trees and its ASTRAL guide.
-Run these commands from the repository root:
+Run the included validation and held-out test examples from the repository
+root. Each has 16 taxa including `OUT`, 1,000 IQ-TREE gene trees, and an ASTRAL guide.
 
 ```bash
-# LQF on validation and LQW on held-out test.
 camus-nn --method lqf --genes examples/validation/genes.nwk \
   --guide examples/validation/guide.nwk --out out-val-lqf
+
 camus-nn --method lqw --genes examples/test/genes.nwk \
   --guide examples/test/guide.nwk --out out-test-lqw
 
-# Iterative LQW on validation, at most five guide solves.
 camus-nn --method lqw --iterate --max-guide-runs 5 \
-  --genes examples/validation/genes.nwk --guide examples/validation/guide.nwk --out out-val-iter
+  --genes examples/validation/genes.nwk \
+  --guide examples/validation/guide.nwk --out out-val-iter
 ```
 
-The trained NN in `models/all-frequency.json` is used by default for both
-methods. Set `--model your-model.json` to use another fit. Outputs include
-`network.nwk` (selected network), `network.csv` (returned candidate curve),
-`prediction.json`, and logs. Iteration also saves `iteration.json` and every
-trial's guide, curve and score in `trials/`.
+The output directory contains the selected network in `network.nwk`, the
+returned candidate curve in `network.csv`, `prediction.json`, and logs.
+Iteration adds `iteration.json` and each trial's guide, curve, and score
+under `trials/`. Temporary count/evidence tables are removed after processes stop.
 
-Each gene tree must occupy one line. Use the same taxa in the gene trees and
-guide. The binary guide must have leaf `OUT` directly under its root. Branch
-lengths are ignored. Each selected quartet needs a resolved gene observation.
+| Argument | Meaning and default |
+| --- | --- |
+| `--genes FILE` | Required. Gene trees, one Newick tree per line. |
+| `--guide FILE` | Required. Binary guide Newick with leaf `OUT` directly under the root. |
+| `--out DIR` | Required. A fresh output directory that must not already exist. |
+| `--method {lqf,lqw}` | Inference method. Default: `lqw`. |
+| `--model FILE` | Trained NN JSON. Default: the bundled `models/all-frequency.json`. |
+| `--sampler {all,rooted,uniform,eu,ew}` | Default: `all` (every quartet). `rooted` uses every quartet containing `OUT` once; `uniform` samples quartet sets globally; `eu` (edge-uniform) and `ew` (edge-walk) sample around guide edges. |
+| `--multiplicity N` | Positive sampling budget multiplier for `uniform`, `eu`, and `ew`: total draws equal `N` times the number of unrooted guide edges, including leaf edges. Default: `50`. Repeated draws contribute repeatedly. |
+| `--seed INTEGER` | Deterministic sampling seed. Default: `42`. |
+| `--case ID` | Case identity combined with the seed to determine sampling. Default: `single-case`. |
+| `--threads N` | Positive C++ counting/search thread count. Default: `1`. |
+| `--batch-rows N` | Positive rows per NN prediction/evidence batch; smaller batches reduce preprocessing memory. Default: `65536`. |
+| `--iterate` | Enable single-cycle guide refinement for LQW. Sampling and learned evidence remain fixed across solves. |
+| `--max-guide-runs N` | Positive solve budget for iteration, including the initial solve. Default: `5`. |
+| `--max-rounds N` | Nonnegative outer switching-pass limit for iteration. Default: `10`; `0` keeps the initial solve. |
+| `--inner-solver {per-k-stopping,overall}` | Default: `per-k-stopping` (heuristic early stopping). `overall` selects exact inner optimization and requires `--iterate`. |
+| `--search-cap K` | Nonnegative maximum reticulations in every LQW solve. Default: uncapped. |
+| `--timeout SECONDS` | Total time limit for counting, preprocessing, and all solves. Must be positive and at most `86400`; default: `86400`. |
+| `--bin-dir DIR` | Directory containing `camus-count` and `camus-native`. Default: bundled executables. |
+| `-h, --help` | Show usage and argument descriptions. |
 
-All quartets are used by default. `--sampler rooted` uses every quartet
-containing `OUT` once; `--sampler uniform`, `eu` or `ew` draws 50 quartets per
-unrooted guide edge, including leaf edges. `--multiplicity` changes that budget;
-`--seed` and `--case` determine the draws. Repeated draws contribute repeatedly.
+Gene trees and guide must have matching taxa. Branch lengths are ignored.
+Any positive number of loci is supported: the NN uses normalized quartet
+frequencies. Each selected quartet needs a resolved gene-tree observation.
 
-Use a new output directory for each run. `--threads` defaults to one.
-`--timeout` limits the whole run, including iterations, to at most 86,400 seconds.
-Temporary count/evidence tables are removed after the processes stop.
+## Preprocessing
+
+Convert a list of true networks and gene-tree files into a reusable labeled
+training table:
+
+```bash
+camus-nn-prepare --training-cases examples/training/cases.json \
+  --output-table out-training/quartets.csv
+```
+
+Preprocessing counts every quartet set with C++ and labels the topologies
+displayed by the supplied true network. The example contains one separate
+training case with 26 taxa and 1,000 IQ-TREE gene trees.
+See [input formats](#input-formats) for the case-list and table structures.
+
+| Argument | Meaning and default |
+| --- | --- |
+| `--training-cases FILE` | Required. JSON case list with `case`, `network`, and `genes` fields. |
+| `--output-table FILE` | Required. New labeled quartet CSV; the destination must not exist. |
+| `--threads N` | Positive C++ counting thread count. Default: `1`. |
+| `--max-switchings N` | Positive limit on exact parent-choice switchings per true network. Default: `4096`. Increase it to label networks requiring more switchings. |
+| `--bin-dir DIR` | Directory containing `camus-count`. Default: bundled executable. |
+| `-h, --help` | Show usage and argument descriptions. |
 
 ## Training
 
-The bundled NN is ready for inference. To fit the same architecture yourself:
+Fit from the table prepared above, or fit directly from the case list.
+Both input modes use the same CSV trainer; direct case input prepares a
+temporary table internally.
 
 ```bash
+# Fit from labeled quartet rows.
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
-  camus-nn-train --data examples/train.csv --model new-model.json --seed 42
-camus-nn --method lqw --model new-model.json \
-  --genes examples/validation/genes.nwk --guide examples/validation/guide.nwk --out out-new-model
+  camus-nn-train --quartet-table out-training/quartets.csv \
+  --output-model out-training/model.json --seed 42
+
+# Fit directly from networks and gene trees.
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+  camus-nn-train --training-cases examples/training/cases.json \
+  --output-model out-training/direct-model.json --seed 42
+
+# Use a newly fitted model for inference.
+camus-nn --method lqw --model out-training/model.json \
+  --genes examples/validation/genes.nwk \
+  --guide examples/validation/guide.nwk --out out-new-model
 ```
 
-`examples/train.csv` demonstrates the training format with synthetic rows.
-Train on labeled quartets from known **training** networks. Required CSV columns:
-`case,split,c0,c1,c2,y0,y1,y2`. Extra columns are ignored. `split` must be `train`.
-For taxa `t0,t1,t2,t3`, channels are `t0 t1 | t2 t3`, `t0 t2 | t1 t3`, and
-`t0 t3 | t1 t2`. Counts are gene-tree observations; labels indicate whether the
-training network displays each topology. Multiple labels may be 1.
+Choose exactly one of the two input arguments.
 
-Training gives each network equal weight, sorts resolved frequencies, handles
-rank ties symmetrically, and fits float64 multilabel cross-entropy with weight
-penalty `1e-4` using L-BFGS-B. Scaling uses training rows only. Defaults are
-seed 42 and eight hidden units. CPU math libraries can affect refits.
+| Argument | Meaning and default |
+| --- | --- |
+| `--quartet-table FILE [FILE ...]` | One or more labeled training CSVs. Input files must be distinct. |
+| `--training-cases FILE` | JSON list of true networks and gene trees; count and label their quartets before fitting. |
+| `--output-model FILE` | Required. New trained NN JSON; the destination must not exist. |
+| `--seed INTEGER` | Nonnegative seed for NN initialization. Default: `42`. |
+| `--hidden-width N` | Positive number of ReLU hidden units. Default: `8`. |
+| `--threads N` | Positive counting thread count with `--training-cases`. Default: `1`. |
+| `--max-switchings N` | Positive exact-labeling budget per network with `--training-cases`. Default: `4096`. |
+| `--bin-dir DIR` | Directory containing `camus-count` for `--training-cases`. Default: bundled executable. |
+| `-h, --help` | Show usage and argument descriptions. |
 
-## Methods and iterations
+Fitting uses float64 multilabel cross-entropy, L-BFGS-B, and weight penalty
+`1e-4`. Each network receives equal total weight, frequency-rank ties are
+treated symmetrically, and scaling is computed from training rows.
 
-LQF retains observed topology counts when `p > 0.5`. LQW uses the signed
-membership score `2*p - 1` for all three channels, multiplied by the quartet's
-sampling multiplicity. The NN takes normalized quartet frequencies, so any
-positive number of input loci is supported. Membership probabilities are
-independent outputs.
+CPU math libraries can affect refits. For matching refits on AVX2-capable
+CPUs, also set `ATEN_CPU_CAPABILITY=avx2`, `OPENBLAS_CORETYPE=Zen`, and
+`MKL_ENABLE_INSTRUCTIONS=AVX2` with the single-thread settings shown above.
 
-Stored LQW weights also include the score scale `n_loci/1000`.
-For the complete-taxon inputs supported here, `n_loci` is the total number of
-input gene trees and this is a common positive factor across all quartets.
-It changes score units, not the mathematical optimum, and does not require
-1,000 loci. With identical frequencies, changing the locus total leaves NN
-predictions unchanged; numerical comparison tolerances still apply.
+## Input formats
 
-Iterative LQW freezes the initial sampling and learned evidence. It proposes
-guides by switching one cycle at a time, in deterministic Newick order, and
-accepts improvements in **guide score + added gain**. A non-improving pass or
-the guide-solve budget stops refinement. Five solves include the initial solve.
-The default inner DP stops at the first non-improving reticulation count and
-is inexact. `--inner-solver overall` chooses exact unrestricted inner DP;
-`--search-cap K` bounds every LQW solve. The outer iteration remains a heuristic.
-All returned candidates are saved.
+### Training case list (JSON)
+
+The file is a nonempty JSON array with one object per training network.
+The included [examples/training/cases.json](examples/training/cases.json) is:
+
+```json
+[
+  {"case": "training-example", "network": "network.nwk", "genes": "genes.nwk"}
+]
+```
+
+| Field | Required value |
+| --- | --- |
+| `case` | Nonempty string identifying the training network. |
+| `network` | String path to the true network in extended Newick. |
+| `genes` | String path to its gene-tree file, one Newick tree per line. |
+| `split` | Optional; when supplied, it must be `"train"`. |
+
+- Paths may be absolute or relative to the JSON file's directory.
+- Case IDs, network files, and gene-tree files must each be distinct across records.
+- Each case needs at least four taxa, with matching labels in the true network and every gene tree.
+- Each quartet needs a resolved gene-tree observation and a resolved topology displayed by the true network. Multiple displayed topologies receive label 1.
+- Keep training cases separate from validation and test cases.
+
+### Labeled quartet table (CSV)
+
+Include a header and one data row per training quartet. These are the first
+two quartets from the included training case, showing the required columns:
+
+```csv
+case,split,c0,c1,c2,y0,y1,y2
+training-example,train,580,196,224,1,0,0
+training-example,train,398,287,315,1,0,0
+```
+
+| Columns | Required values |
+| --- | --- |
+| `case` | Nonempty network ID; every row from the same training network shares this ID. |
+| `split` | The literal value `train` on every row. |
+| `c0,c1,c2` | Finite, nonnegative integer counts of resolved gene-tree topologies. Their sum must be positive on each row. |
+| `y0,y1,y2` | Binary displayed-topology membership labels, each `0` or `1`. The complete training data must contain both 0 and 1 labels. |
+
+Counts and labels use the same channel order:
+
+- Channel 0: `t0 t1 | t2 t3`.
+- Channel 1: `t0 t2 | t1 t3`.
+- Channel 2: `t0 t3 | t1 t2`.
+
+The preprocessor also writes `t0,t1,t2,t3` (taxon labels in sorted order)
+and `n_loci` (number of input gene trees). Extra columns are ignored by the
+CSV trainer.
 
 ## Tests
+
+With the `train` extra installed, run:
 
 ```bash
 python -m unittest discover -s tests -v
@@ -111,6 +204,4 @@ python -m unittest discover -s tests -v
 ## AI assistance
 
 OpenAI ChatGPT/Codex assisted with implementation, refactoring, documentation,
-and test development for this repository.
-
-See [LICENSE](LICENSE) for licensing.
+and test development for this repository. See [LICENSE](LICENSE) for licensing.
