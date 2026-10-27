@@ -5,3 +5,4 @@ recursive-include examples *.csv *.nwk *.json
 recursive-include tests *.py
 recursive-include tests/fixtures *.json
 recursive-include tests/fixtures *.csv
+recursive-include misc *.py *.md *.toml

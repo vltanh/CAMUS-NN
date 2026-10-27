@@ -8,3 +8,4 @@ out-*/
 camus_nn/bin/
 camus_nn/models/
 camus_nn/licenses/
+vendor/

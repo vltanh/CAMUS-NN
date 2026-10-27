@@ -1,0 +1,4 @@
+[deps]
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+PhyloNetworks = "33ad39ac-ed31-50eb-9b15-43d0656eaa72"
+SNaQ = "c2bf7a07-44d2-4d11-b5e2-76dc5aa199d6"

@@ -193,6 +193,12 @@ The preprocessor also writes `t0,t1,t2,t3` (taxon labels in sorted order)
 and `n_loci` (number of input gene trees). Extra columns are ignored by the
 CSV trainer.
 
+## Other inference methods
+
+The [misc scripts](misc/README.md) run BROOQS with TOB-QMC, SNaQ, and
+PhyloNet-MPL. Each script includes installation commands for the versions used;
+the linked guide gives runnable examples and explains every argument.
+
 ## Tests
 
 With the `train` extra installed, run:
