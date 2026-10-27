@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "camus-nn"
+version = "0.1.0"
+description = "Learned quartet filtering, signed weighting, and iterative C++ network inference"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = ["numpy>=1.24", "torch>=2.1", "networkx>=3"]
+
+[project.optional-dependencies]
+train = ["scipy>=1.11"]
+
+[project.scripts]
+camus-nn = "camus_nn.infer:main"
+camus-nn-train = "camus_nn.train:main"
+
+[tool.setuptools]
+packages = ["camus_nn"]
+
+[tool.setuptools.package-data]
+camus_nn = ["bin/*", "models/*.json", "licenses/*"]

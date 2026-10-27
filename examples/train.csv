@@ -1,0 +1,13 @@
+case,split,c0,c1,c2,y0,y1,y2
+single,train,9,1,0,1,0,0
+single,train,1,0,9,0,0,1
+single,train,0,9,1,0,1,0
+single,train,8,1,1,1,0,0
+single,train,1,8,1,0,1,0
+single,train,1,1,8,0,0,1
+reticulate,train,6,4,0,1,1,0
+reticulate,train,4,0,6,1,0,1
+reticulate,train,0,6,4,0,1,1
+reticulate,train,4,4,2,1,1,0
+reticulate,train,4,2,4,1,0,1
+reticulate,train,2,4,4,0,1,1
