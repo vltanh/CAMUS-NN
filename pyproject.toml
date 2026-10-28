@@ -18,6 +18,7 @@ train = ["scipy==1.11.4", "numpy==1.26.4", "torch==2.5.1", "networkx==3.2.1"]
 camus-nn = "camus_nn.infer:main"
 camus-nn-train = "camus_nn.train:main"
 camus-nn-prepare = "camus_nn.prepare:main"
+camus-nn-evaluate = "camus_nn.evaluate:main"
 
 [tool.setuptools]
 packages = ["camus_nn"]

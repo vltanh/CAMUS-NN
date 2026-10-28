@@ -109,6 +109,72 @@ Gene trees and guide must have matching taxa. Branch lengths are ignored.
 Any positive number of loci is supported: the NN uses normalized quartet
 frequencies. Each selected quartet needs a resolved gene-tree observation.
 
+## Network evaluation
+
+Compare a true network with any inferred network saved in extended Newick:
+
+```bash
+camus-nn-evaluate --truth true-network.nwk \
+  --estimate out-test-lqw/network.nwk --output ../results/scores.json
+
+# Equivalent command from the source checkout.
+python -m camus_nn.evaluate --truth true-network.nwk \
+  --estimate out-test-lqw/network.nwk
+```
+
+The command prints JSON and optionally saves it to a new file. Inputs are
+never modified. The Python API accepts Newick strings:
+
+```python
+from camus_nn.evaluate import evaluate_networks
+
+scores = evaluate_networks(true_newick, estimated_newick)
+print(scores["softwired_fn"], scores["softwired_fp"], scores["softwired_error"])
+print(scores["hardwired_distance"])  # Raw HWCD count.
+```
+
+Softwired clusters are the union of clusters across all displayed trees.
+Hardwired clusters are descendant leaf sets in the complete directed network.
+Both use **distinct nontrivial cluster sets**, omitting singletons and the
+full taxon set. Duplicate clusters, including duplicates from parallel hybrid
+edges, count once. For true and estimated cluster sets `T` and `P`:
+
+```text
+FN = |T - P| / |T|       FP = |P - T| / |P|
+error = (FN + FP) / 2
+HWCD = |T symmetric-difference P|   (hardwired clusters)
+```
+
+Rates are fractions in `[0, 1]`; multiply by 100 for percentages. An empty
+denominator gives rate zero. `hardwired_distance` is a raw count, without
+percentage normalization or division by two. Results also include normalized
+hardwired FN/FP/error, cluster counts, precision, recall and F1. Mean HWCD
+across datasets is the average of the per-network raw counts. This is the
+cluster-set convention, distinct from PhyloNetworks' edge-typed multiset variant.
+
+| Argument | Meaning and default |
+| --- | --- |
+| `--truth FILE` | Required. One true network in extended Newick. |
+| `--estimate FILE` | Required. One estimated network on exactly the same taxa. |
+| `--metric {both,softwired,hardwired}` | Default: `both`. Hardwired-only evaluation avoids displayed-tree extraction. |
+| `--outgroup LABEL` | Default: `OUT`. Orient clusters away from this taxon; it must exist in both inputs. |
+| `--rooted` | Use the roots supplied in Newick, instead of outgroup orientation. Mutually exclusive with `--outgroup`. |
+| `--max-switchings N` | Positive exact SW switching budget per network; default `65536`. |
+| `--output FILE` | Optional new JSON output file. Also prints results to stdout. |
+
+SW extraction factors switchings by components separated by bridges; the budget
+counts `1 + sum(2**h - 1)` configurations over components with `h` reticulations.
+It raises an error when the budget is exceeded and never substitutes sampling.
+The evaluator supports binary reticulations, tree polytomies and parallel edges.
+Branch lengths and inheritance probabilities do not affect these metrics.
+Outgroup orientation does not reroot hybrid edges or minimize over alternative
+network roots. Every valid input is scored; root placement does not filter cases.
+
+The extraction functions `cluster_summary`, `hardwired_clusters`,
+`softwired_cluster_distance` and `hardwired_cluster_distance` are available
+from `camus_nn.evaluate`. These lower-level functions use supplied roots by
+default; pass `outgroup="OUT"` to match `evaluate_networks` and the CLI.
+
 ## Preprocessing
 
 Convert a list of true networks and gene-tree files into a reusable labeled
