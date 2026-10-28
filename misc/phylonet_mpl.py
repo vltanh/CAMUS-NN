@@ -12,8 +12,12 @@ import hashlib
 from pathlib import Path
 import re
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from camus_nn.rooting import root_on_outgroup, tree_graph
+
 JAR_SHA256 = 'eefabc198f113d3c835d67a44206203382e99a582d199478cc53f0bb746658fb'
 
 
@@ -22,6 +26,8 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--gene-trees', type=Path, required=True, help='Gene trees, one Newick per line')
     parser.add_argument('--starting-tree', type=Path, required=True, help='Supplied starting tree in Newick')
+    parser.add_argument('--outgroup', default='OUT',
+                        help='Root each gene tree and starting tree on this taxon (default: OUT)')
     parser.add_argument('--max-reticulations', type=int, required=True,
                         help='Nonnegative maximum reticulation count')
     parser.add_argument('--output-directory', type=Path, required=True,
@@ -42,6 +48,8 @@ def parse_arguments():
         parser.error('--seed must be nonnegative')
     if min(args.runs, args.threads) < 1:
         parser.error('--runs and --threads must be positive')
+    if not args.outgroup:
+        parser.error('--outgroup must be a nonempty taxon label')
     args.gene_trees = args.gene_trees.resolve(strict=True)
     args.starting_tree = args.starting_tree.resolve(strict=True)
     args.jar = args.jar.resolve(strict=True)
@@ -52,11 +60,17 @@ def parse_arguments():
 
 
 def write_nexus_input(args, destination):
-    """Put the supplied starting tree, gene trees, and MPL command in one file."""
+    """Root topology-only copies on the outgroup before building the MPL input."""
     genes = [line.strip() for line in args.gene_trees.read_text().splitlines() if line.strip()]
     starting = args.starting_tree.read_text().strip()
     if not genes or any(not tree.endswith(';') for tree in [starting, *genes]):
         raise ValueError('Provide one complete starting Newick and one complete gene Newick per line')
+    starting = root_on_outgroup(starting, args.outgroup)
+    guide = tree_graph(starting)
+    taxa = {guide.nodes[u]['label'] for u in guide if guide.out_degree(u) == 0}
+    genes = [root_on_outgroup(tree, args.outgroup, taxa) for tree in genes]
+    (destination.parent / 'genes-rooted.nwk').write_text('\n'.join(genes) + '\n')
+    (destination.parent / 'starting-rooted.nwk').write_text(starting + '\n')
 
     search_command = (
         f'InferNetwork_MPL (all) {args.max_reticulations}'

@@ -178,7 +178,14 @@ python misc/phylonet_mpl.py \
 This runs PhyloNet 3.8.2 with OpenJDK 17 using native `InferNetwork_MPL`:
 ten searches (`-x 10`), seed 42 (`-rs 42`), and eight likelihood threads
 (`-pl 8`). The supplied tree starts the search; its topology is allowed to
-change. The script selects the fitted network with the highest reported log
+change. Before inference, the script roots every gene tree and the starting
+tree on the `OUT` incident edge, retaining OUT and the original unrooted
+topologies. Set `--outgroup` for another taxon. Missing outgroups and mismatched
+taxon sets are errors. MPL uses rooted triplets, so rooting only the starting
+tree is insufficient. Lengths/supports are omitted because MPL uses topologies.
+The script saves `genes-rooted.nwk` and `starting-rooted.nwk` alongside
+`input.nex`; the supplied input files are preserved.
+The script selects the fitted network with the highest reported log
 pseudolikelihood. PhyloNet results can vary between runs even with the same
 seed, so matching these settings does not guarantee identical output.
 
@@ -188,6 +195,7 @@ seed, so matching these settings does not guarantee identical output.
 | --- | --- |
 | `--gene-trees FILE` | Required. Gene trees, one Newick per line. |
 | `--starting-tree FILE` | Required. Starting tree in Newick. |
+| `--outgroup TAXON` | Root every input tree on this taxon; default: `OUT`. |
 | `--max-reticulations N` | Required. Nonnegative native reticulation limit; the returned network may contain fewer reticulations. |
 | `--output-directory DIR` | Required. Fresh directory for `network.nwk`, `input.nex`, and `phylonet.log`. |
 
