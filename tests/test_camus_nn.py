@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -16,7 +17,7 @@ import torch
 from camus_nn.evidence import membership, write_evidence
 from camus_nn.io import load_model
 from camus_nn.infer import DEFAULT_BIN_DIR
-from camus_nn.iterate import refine, switching_guides
+from camus_nn.iterate import anchored_tree, canonical_tree, refine, switching_guides
 from camus_nn.sampling import sample_quartets
 from camus_nn.topology import Tree, parse_network, validate_network
 from camus_nn.prepare import displayed_memberships, prepare_training_csv, read_cases
@@ -45,6 +46,22 @@ def displayed_choices(network, groups):
 
 
 class ModelTests(unittest.TestCase):
+    def test_installed_binaries_take_precedence_over_stale_source_build(self):
+        import camus_nn.infer as infer
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);package=root/'checkout/camus_nn';installed=root/'installed/camus_nn/bin'
+            old=root/'checkout/build'
+            for folder in (old,installed):
+                folder.mkdir(parents=True)
+                for name in ('camus-native','camus-count'):(folder/name).write_text('fixture')
+            # A source .egg-info distribution can appear before the wheel.
+            sources=[SimpleNamespace(locate_file=lambda p:root/'checkout'/p),
+                     SimpleNamespace(locate_file=lambda p:root/'installed'/p)]
+            with patch.object(infer,'ROOT',root/'checkout'),patch.object(infer,'PACKAGE',package), \
+                 patch.object(infer,'distributions',return_value=sources):
+                self.assertEqual(infer.binary_directory(),installed)
+
     @classmethod
     def setUpClass(cls):
         torch.set_num_threads(1)
@@ -103,6 +120,17 @@ class ModelTests(unittest.TestCase):
 
 
 class SwitchingTests(unittest.TestCase):
+    def test_supplied_root_allows_root_cycles_and_preserves_taxa(self):
+        network='((A,(B)#H1),(#H1,(C,D)));'
+        guides=['((A,B),(C,D));','(A,(B,(C,D)));']
+        for guide in guides:
+            with self.assertRaisesRegex(ValueError,'OUT'):
+                anchored_tree(guide)
+            proposals=list(switching_guides(network,guide,anchor_outgroup=False))
+            self.assertEqual({canonical_tree(p) for p in proposals},
+                             {canonical_tree(p) for p in guides}-{canonical_tree(guide)})
+            self.assertTrue(all(set(Tree.from_newick(p).tips)=={'A','B','C','D'} for p in proposals))
+
     def test_single_cycle_neighbors_and_sampler_budgets(self):
         guide = '(OUT,(((A,B),C),((D,E),F)));'
         neighbors = list(switching_guides(TWO, guide))
@@ -144,6 +172,50 @@ class SwitchingTests(unittest.TestCase):
 
 @unittest.skipUnless((BIN / 'camus-native').is_file() and (BIN / 'camus-count').is_file(), 'Install the package first')
 class NativeTests(unittest.TestCase):
+    def test_unanchored_signed_objective_matches_independent_quartets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);guide=root/'guide.nwk';guide.write_text('((A,B),(C,D));')
+            groups=[('A','B','C','D')];weights=np.array([[100.,20.,-50.]])
+            evidence=root/'weights.csv';evidence.write_text(
+                'a,b,c,d,weight\nA,B,C,D,100\nA,C,B,D,20\nA,D,B,C,-50\n')
+            command=[str(BIN/'camus-native'),'-q','0','-quartet-weights','-signed-weights',
+                '-signed-max-reticulations','-1','-signed-stop-on-plateau=true',
+                '-o',str(root/'network'),str(guide),str(evidence)]
+            subprocess.run(command,check=True,capture_output=True)
+            native=json.loads((root/'network.metrics.json').read_text())
+            self.assertFalse(native['outgroup_anchored'])
+            self.assertEqual(native['objective']['guide_score'],100.)
+            with (root/'network.csv').open() as stream:rows=list(csv.DictReader(stream))
+            for row in rows:
+                value=weights[displayed_choices(row['Extended Newick'],groups)].sum()
+                self.assertEqual(value,100.+float(row['Signed Quartet Gain']))
+
+    def test_supplied_root_cli_preserves_names_and_records_reproducible_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);guide=root/'guide.nwk';guide.write_text('((A,B),(C,D));\n')
+            genes=root/'genes.nwk';genes.write_text(guide.read_text()*6+'((A,C),(B,D));\n'*4)
+            common=[sys.executable,'-B','-m','camus_nn.infer','--genes',str(genes),
+                '--guide',str(guide),'--guide-rooting','supplied','--bin-dir',str(BIN)]
+            for name,options in [('orig',['--method','orig']),('lqf',['--method','lqf']),
+                                 ('lqw',[]),('iter',['--iterate'])]:
+                output=root/name
+                subprocess.run([*common,*options,'--out',str(output)],check=True,capture_output=True)
+                pred=json.loads((output/'prediction.json').read_text())
+                self.assertEqual(pred['guide_rooting'],'supplied')
+                self.assertFalse(pred['outgroup_anchored'])
+                self.assertEqual(set(Tree.from_newick((output/'guide.nwk').read_text()).tips),{'A','B','C','D'})
+                self.assertFalse((output/'tmp').exists())
+                provenance=json.loads((output/'run.json').read_text())
+                self.assertEqual(provenance['inputs']['genes']['sha256'],__import__('hashlib').sha256(genes.read_bytes()).hexdigest())
+                if name=='iter':
+                    iteration=json.loads((output/'iteration.json').read_text())
+                    self.assertFalse(iteration['outgroup_anchored'])
+                    self.assertLessEqual(len(iteration['trials']),5)
+            for bad in [['--iterate','--inner-solver','overall'],['--sampler','rooted']]:
+                output=root/('bad-'+bad[-1]);r=subprocess.run([*common,*bad,'--out',str(output)],capture_output=True)
+                self.assertNotEqual(r.returncode,0)
+                self.assertFalse(output.exists())
+
     def test_original_filter_tie_order_and_strict_threshold(self):
         # Channels are AB|CD, AC|BD, AD|BC. At a tie, later channels win.
         examples = [

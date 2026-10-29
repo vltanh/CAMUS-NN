@@ -1,9 +1,21 @@
 # CAMUS-NN
 
-CAMUS-NN provides C++ inference for **original CAMUS**, **CAMUS-LQF**,
-**CAMUS-LQW**, and iterative CAMUS-LQW, plus training for the learned methods.
-LQF and LQW use the included frequency-only neural network: three inputs,
-eight ReLU hidden units, and three membership outputs.
+CAMUS-NN reconstructs phylogenetic networks from gene trees that disagree.
+Starting from a guide tree, it adds reticulation edges to represent histories
+such as hybridization.
+
+Give it **gene trees and a binary guide tree on the same taxa** (for example,
+an ASTRAL tree). It returns an **inferred network in extended Newick**, candidate
+networks and scores, and logs recording the run.
+
+- **Original CAMUS** uses frequency thresholds to select quartet signals.
+- **CAMUS-LQF** uses a trained neural network to filter those signals.
+- **CAMUS-LQW** uses the network's predictions as quartet weights.
+- **CAMUS-LQW + iteration** refines the guide and reruns LQW, reusing the same
+  quartet evidence for up to five solves by default.
+
+LQF and LQW share the included trained model. You can also train a new model
+from networks with known histories.
 
 ## Install
 
@@ -27,27 +39,55 @@ and preprocessing. Pip also supports `python -m pip install '.[train]'`.
 
 Run the included validation and held-out test examples from the repository
 root. Each has 16 taxa including `OUT`, 1,000 IQ-TREE gene trees, and an ASTRAL guide.
+Keep result directories outside the source checkout:
+
+```bash
+RESULTS=../camus-nn-results
+mkdir -p "$RESULTS/tmp"
+export TMPDIR="$(cd "$RESULTS/tmp" && pwd)"
+```
 
 ```bash
 camus-nn --method orig --genes examples/validation/genes.nwk \
-  --guide examples/validation/guide.nwk --out out-val-camus
+  --guide examples/validation/guide.nwk --out "$RESULTS/val-camus"
 
 camus-nn --method lqf --model models/all-frequency.json \
   --genes examples/validation/genes.nwk \
-  --guide examples/validation/guide.nwk --out out-val-lqf
+  --guide examples/validation/guide.nwk --out "$RESULTS/val-lqf"
 
 camus-nn --method lqw --model models/all-frequency.json \
   --genes examples/test/genes.nwk \
-  --guide examples/test/guide.nwk --out out-test-lqw
+  --guide examples/test/guide.nwk --out "$RESULTS/test-lqw"
 
 camus-nn --method lqw --model models/all-frequency.json \
-  --iterate --max-guide-runs 5 \
+  --iterate --inner-solver per-k-stopping --max-guide-runs 5 \
   --genes examples/validation/genes.nwk \
-  --guide examples/validation/guide.nwk --out out-val-iter
+  --guide examples/validation/guide.nwk --out "$RESULTS/val-iter"
 ```
+
+For data without a known outgroup, preserve the supplied ASTRAL root and
+original taxon names with `--guide-rooting supplied`. Use the same flag for
+fixed-guide and iterative LQW:
+
+```bash
+camus-nn --method lqw --model models/all-frequency.json \
+  --genes gene-trees.nwk --guide astral.nwk --guide-rooting supplied \
+  --sampler all --threads 1 --out "$RESULTS/lqw"
+
+camus-nn --method lqw --model models/all-frequency.json \
+  --genes gene-trees.nwk --guide astral.nwk --guide-rooting supplied \
+  --sampler all --threads 1 --iterate --inner-solver per-k-stopping \
+  --max-guide-runs 5 --out "$RESULTS/lqw-iter"
+```
+
+The default `--guide-rooting outgroup` uses a guide with the known outgroup
+named `OUT` directly below the root. Iteration keeps that outgroup outside
+reticulation cycles. Supplied-root iteration allows cycles involving the root.
 
 The output directory contains the selected network in `network.nwk`, the
 returned candidate curve in `network.csv`, `prediction.json`, and logs.
+`run.json` records arguments and SHA-256 identities of the inputs, model and
+executables. Each native solve saves its command in `command.json`.
 Iteration adds `iteration.json` and each trial's guide, curve, and score
 under `trials/`. Temporary count/evidence tables are removed after processes stop.
 
@@ -62,7 +102,8 @@ and the C++ search. It does not load or apply the neural network.
 | Argument | Meaning and default |
 | --- | --- |
 | `--genes FILE` | Required. Gene trees, one Newick tree per line. |
-| `--guide FILE` | Required. Binary guide Newick with leaf `OUT` directly under the root. |
+| `--guide FILE` | Required. Binary guide Newick on the gene-tree taxa. |
+| `--guide-rooting {outgroup,supplied}` | Default: `outgroup`, requiring `OUT` as a root child. `supplied` preserves the input root and taxon names without anchoring an outgroup. |
 | `--out DIR` | Required. A fresh output directory that must not already exist. |
 | `--method {orig,lqf,lqw}` | Original CAMUS or a learned method. Default: `lqw`. |
 | `--model FILE` | Trained NN JSON for LQF/LQW. Default: the bundled `models/all-frequency.json`. Unused by original CAMUS. |
@@ -87,7 +128,7 @@ and the C++ search. It does not load or apply the neural network.
 | `--iterate` | Enable single-cycle guide refinement for LQW. Sampling and learned evidence remain fixed across solves. |
 | `--max-guide-runs N` | Positive solve budget for iteration, including the initial solve. Default: `5`. |
 | `--max-rounds N` | Nonnegative outer switching-pass limit for iteration. Default: `10`; `0` keeps the initial solve. |
-| `--inner-solver {per-k-stopping,overall}` | Default: `per-k-stopping` (heuristic early stopping). `overall` selects exact inner optimization and requires `--iterate`. |
+| `--inner-solver {per-k-stopping,overall}` | Default: `per-k-stopping` (heuristic early stopping). `overall` selects exact inner optimization and requires `--iterate` with outgroup rooting. |
 | `--search-cap K` | Nonnegative maximum reticulations in every LQW solve. Default: uncapped. |
 
 </details>
@@ -115,11 +156,11 @@ Compare a true network with any inferred network saved in extended Newick:
 
 ```bash
 camus-nn-evaluate --truth true-network.nwk \
-  --estimate out-test-lqw/network.nwk --output ../results/scores.json
+  --estimate "$RESULTS/test-lqw/network.nwk" --output "$RESULTS/scores.json"
 
 # Equivalent command from the source checkout.
 python -m camus_nn.evaluate --truth true-network.nwk \
-  --estimate out-test-lqw/network.nwk
+  --estimate "$RESULTS/test-lqw/network.nwk"
 ```
 
 The command prints JSON and optionally saves it to a new file. Inputs are
@@ -170,6 +211,10 @@ Branch lengths and inheritance probabilities do not affect these metrics.
 Outgroup orientation does not reroot hybrid edges or minimize over alternative
 network roots. Every valid input is scored; root placement does not filter cases.
 
+For original-label data without `OUT`, select a shared taxon as the split
+reference, for example `--outgroup t1`. This only orients the comparison; it
+does not declare a biological outgroup or change the inferred network.
+
 The extraction functions `cluster_summary`, `hardwired_clusters`,
 `softwired_cluster_distance` and `hardwired_cluster_distance` are available
 from `camus_nn.evaluate`. These lower-level functions use supplied roots by
@@ -182,7 +227,7 @@ training table:
 
 ```bash
 camus-nn-prepare --training-cases examples/training/cases.json \
-  --output-table out-training/quartets.csv
+  --output-table "$RESULTS/training/quartets.csv"
 ```
 
 Preprocessing counts every quartet set with C++ and labels the topologies
@@ -218,18 +263,18 @@ temporary table internally.
 ```bash
 # Fit from labeled quartet rows.
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
-  camus-nn-train --quartet-table out-training/quartets.csv \
-  --output-model out-training/model.json --seed 42
+  camus-nn-train --quartet-table "$RESULTS/training/quartets.csv" \
+  --output-model "$RESULTS/training/model.json" --seed 42
 
 # Fit directly from networks and gene trees.
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
   camus-nn-train --training-cases examples/training/cases.json \
-  --output-model out-training/direct-model.json --seed 42
+  --output-model "$RESULTS/training/direct-model.json" --seed 42
 
 # Use a newly fitted model for inference.
-camus-nn --method lqw --model out-training/model.json \
+camus-nn --method lqw --model "$RESULTS/training/model.json" \
   --genes examples/validation/genes.nwk \
-  --guide examples/validation/guide.nwk --out out-new-model
+  --guide examples/validation/guide.nwk --out "$RESULTS/new-model"
 ```
 
 Choose exactly one of the two input arguments.
@@ -271,6 +316,8 @@ treated symmetrically, and scaling is computed from training rows.
 CPU math libraries can affect refits. For matching refits on AVX2-capable
 CPUs, also set `ATEN_CPU_CAPABILITY=avx2`, `OPENBLAS_CORETYPE=Zen`, and
 `MKL_ENABLE_INSTRUCTIONS=AVX2` with the single-thread settings shown above.
+The single training example exercises the commands; recreating the bundled
+model requires its full original training cohort, not this one example.
 
 ## Input formats
 
@@ -331,6 +378,23 @@ CSV trainer.
 The [misc scripts](misc/README.md) run original CAMUS, BROOQS with TOB-QMC,
 SNaQ, and PhyloNet-MPL. Each script includes installation commands for the versions used;
 the linked guide gives runnable examples and explains every argument.
+
+## Reproducibility
+
+After a normal wheel installation, repeat the examples in fresh directories:
+
+```bash
+python scripts/check_reproducibility.py --out "$RESULTS/reproducibility"
+# With the train extra, also check repeated fitting and CSV/direct training.
+python scripts/check_reproducibility.py --training --out "$RESULTS/reproducibility-training"
+```
+
+The check compares complete candidate curves and selected networks for original
+CAMUS, LQF, LQW and iteration. It also exercises supplied-root LQW without `OUT`
+and records the installed package, dependencies, model and input hashes in
+`report.json`. Each run counts its own quartets and cleans its temporary tables.
+These checks establish repeatability in the recorded environment. CPU math
+dispatch and library versions can affect refitting, as described above.
 
 ## Tests
 

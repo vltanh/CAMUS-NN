@@ -8,13 +8,19 @@ Inputs are gene trees (one complete Newick per line) and a supplied starting
 tree in Newick, with matching taxon labels. The examples use the included
 IQ-TREE gene trees and ASTRAL guide. Choose a new output directory for every run.
 
+```bash
+RESULTS=../camus-nn-results
+mkdir -p "$RESULTS/tmp"
+export TMPDIR="$(cd "$RESULTS/tmp" && pwd)"
+```
+
 ## Original CAMUS
 
 ```bash
 python misc/camus_original.py \
   --gene-trees examples/validation/genes.nwk \
   --starting-tree examples/validation/guide.nwk \
-  --output-directory out-camus-original
+  --output-directory "$RESULTS/camus-original"
 ```
 
 This runs original CAMUS with the included C++ implementation, using every
@@ -27,7 +33,8 @@ quartet, filter mode 2, and threshold 0.5. The NN is unused. The runner calls
 | Argument | Meaning and default |
 | --- | --- |
 | `--gene-trees FILE` | Required. Gene trees, one Newick per line. |
-| `--starting-tree FILE` | Required. Binary guide Newick with `OUT` directly under the root. |
+| `--starting-tree FILE` | Required. Binary guide Newick on the gene-tree taxa. |
+| `--guide-rooting {outgroup,supplied}` | Default: `outgroup`, with `OUT` at the guide root. `supplied` preserves the root and names. |
 | `--output-directory DIR` | Required. Fresh output directory. |
 
 <details>
@@ -53,24 +60,36 @@ BROOQS:
 python misc/brooqs.py \
   --gene-trees examples/validation/genes.nwk \
   --starting-tree examples/validation/guide.nwk \
-  --tob-search 3f1a --output-directory out-brooqs
+  --outgroup OUT --rooted --tob-search 3f1a \
+  --output-directory "$RESULTS/brooqs"
 
 # Exhaustive ToB search instead of 3-fix-1-alter search.
 python misc/brooqs.py \
   --gene-trees examples/validation/genes.nwk \
   --starting-tree examples/validation/guide.nwk \
-  --tob-search exhaustive --output-directory out-brooqs-exhaustive
+  --outgroup OUT --rooted --tob-search exhaustive \
+  --output-directory "$RESULTS/brooqs-exhaustive"
 
 # Resolve an existing ToB without repeating its estimation.
 python misc/brooqs.py \
   --gene-trees examples/validation/genes.nwk \
-  --tree-of-blobs out-brooqs/tree-of-blobs.nwk \
-  --output-directory out-brooqs-resolve
+  --tree-of-blobs "$RESULTS/brooqs/tree-of-blobs.nwk" --rooted \
+  --output-directory "$RESULTS/brooqs-resolve"
 ```
 
 The runner uses TREE-QMC 4.1.5 revision `53b15e5c` and BROOQS revision
 `17b25b2e`. It runs TOB-QMC's blob search on the supplied guide, then runs
-BROOQS with rooted input and minimum blob size 4.
+BROOQS with minimum blob size 4. The default omits BROOQS `--rooted` and
+TOB-QMC `--root`, matching the published BROOQS-data comparison: the supplied
+ASTRAL tree guides the blob search, without assuming a biological outgroup.
+For a known outgroup, add `--outgroup OUT`; add `--rooted` only when the ToB
+root should constrain BROOQS resolution. The examples above use the known
+`OUT` in the included data. For published BROOQS inputs without a known outgroup:
+
+```bash
+python misc/brooqs.py --gene-trees gene-trees.nwk --starting-tree astral.nwk \
+  --tob-search exhaustive --output-directory "$RESULTS/brooqs-astral"
+```
 
 **Inputs, output, and search mode**
 
@@ -78,7 +97,7 @@ BROOQS with rooted input and minimum blob size 4.
 | --- | --- |
 | `--gene-trees FILE` | Required. Gene trees, one Newick per line. |
 | `--starting-tree FILE` | Supplied guide for ToB estimation. Use this or `--tree-of-blobs`. |
-| `--tree-of-blobs FILE` | Existing rooted ToB. Use this or `--starting-tree`. |
+| `--tree-of-blobs FILE` | Existing ToB. Use this or `--starting-tree`. |
 | `--tob-search {exhaustive,3f1a}` | Required with `--starting-tree`; omitted with `--tree-of-blobs`. Exhaustive search passes `--iter_limit_blob 0`; 3f1a passes `--3f1a`. |
 | `--output-directory DIR` | Required. Fresh directory for the inferred network and logs. |
 
@@ -87,7 +106,8 @@ BROOQS with rooted input and minimum blob size 4.
 
 | Argument | Meaning and default |
 | --- | --- |
-| `--outgroup LABEL` | ToB rooting taxon. Default: `OUT`. Used during ToB estimation. |
+| `--outgroup LABEL` | Optional known outgroup passed to ToB estimation. Default: no explicit rooting taxon. |
+| `--rooted` | Constrain BROOQS to the supplied ToB root. Default: off. |
 | `--alpha NUMBER` | ToB quartet tree-test significance level. Default: `1e-7`; strictly between 0 and 1. |
 | `--beta NUMBER` | ToB quartet star-test significance level. Default: `0.95`; strictly between 0 and 1. |
 | `--polytomy-seed INTEGER` | Nonnegative TOB-QMC polytomy-resolution seed. Default: `12345`. |
@@ -118,7 +138,7 @@ python misc/snaq.py \
   --starting-tree examples/test/guide.nwk \
   --max-reticulations 1 --runs 32 --seed 42 \
   --search-workers 8 --threads 4 --max-failures 75 \
-  --output-directory out-snaq
+  --output-directory "$RESULTS/snaq"
 ```
 
 Use Julia 1.11.6 with the included environment, which locks SNaQ 1.2.1,
@@ -172,7 +192,7 @@ python misc/phylonet_mpl.py \
   --gene-trees examples/test/genes.nwk \
   --starting-tree examples/test/guide.nwk \
   --max-reticulations 1 --runs 10 --seed 42 \
-  --threads 8 --heap 6g --output-directory out-phylonet-mpl
+  --threads 8 --heap 6g --output-directory "$RESULTS/phylonet-mpl"
 ```
 
 This runs PhyloNet 3.8.2 with OpenJDK 17 using native `InferNetwork_MPL`:

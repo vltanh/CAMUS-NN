@@ -24,11 +24,11 @@ def canonical_tree(tree):
     return emit(tree.root) + ';'
 
 
-def anchored_tree(text, taxa=None):
+def anchored_tree(text, taxa=None, *, anchor_outgroup=True):
     tree = Tree.from_newick(text, binary=True)
     if taxa is not None and set(tree.tips) != set(taxa):
         raise ValueError('Every iterative guide must have exactly the original taxa')
-    if 'OUT' not in tree.tips or tree.parent[tree.tips['OUT']] != tree.root:
+    if anchor_outgroup and ('OUT' not in tree.tips or tree.parent[tree.tips['OUT']] != tree.root):
         raise ValueError('Iterative inference requires leaf OUT as a root child')
     return tree
 
@@ -44,7 +44,7 @@ def clades(tree):
     return result
 
 
-def switching_guides(network, guide):
+def switching_guides(network, guide, *, anchor_outgroup=True):
     """Flip parents relative to the supplied guide, without a 2**r scan.
 
     In a binary level-1 network each cycle changes its own set of clusters.
@@ -53,9 +53,9 @@ def switching_guides(network, guide):
     """
     graph = parse_network(network)
     validate_network(graph, level1=True)
-    reference = anchored_tree(guide)
+    reference = anchored_tree(guide, anchor_outgroup=anchor_outgroup)
     root = next(u for u in graph if graph.in_degree(u) == 0)
-    if not any(graph.nodes[v].get('label') == 'OUT' for v in graph.successors(root)):
+    if anchor_outgroup and not any(graph.nodes[v].get('label') == 'OUT' for v in graph.successors(root)):
         raise ValueError('The network must keep OUT outside all cycles')
     hybrids = [u for u in graph if graph.in_degree(u) == 2]
     if any((graph.in_degree(u), graph.out_degree(u)) not in
@@ -81,20 +81,20 @@ def switching_guides(network, guide):
     seen = {canonical_tree(reference)}
     for mask in masks:
         text = canonical_tree(switched(bits ^ mask))
-        anchored_tree(text, reference.tips)
+        anchored_tree(text, reference.tips, anchor_outgroup=anchor_outgroup)
         if text not in seen:
             seen.add(text)
             yield text
 
 
 def refine(guide, evidence, output, solve, *, max_guide_runs=5, max_rounds=10,
-           search_cap=None, inner_solver='per-k-stopping'):
+           search_cap=None, inner_solver='per-k-stopping', anchor_outgroup=True):
     """Best improvement per pass; all trials compete on total quartet score.
 
     The first solve counts toward the total budget. Sampling and learned
     evidence stay fixed across guide solves.
     """
-    original = anchored_tree(guide)
+    original = anchored_tree(guide, anchor_outgroup=anchor_outgroup)
     evidence_hash = digest(evidence)
     seen, trials, accepted = set(), [], []
     incumbent = None
@@ -103,6 +103,8 @@ def refine(guide, evidence, output, solve, *, max_guide_runs=5, max_rounds=10,
     def checkpoint(status='running'):
         report = dict(schema='camus-nn-iteration/v1', status=status,
             weights_frozen=True,
+            guide_rooting='outgroup' if anchor_outgroup else 'supplied',
+            outgroup_anchored=anchor_outgroup,
             objective='total_signed_displayed_quartet_score',
             inner_solver=inner_solver, inner_optimization_exact=inner_solver == 'overall',
             search_cap=search_cap, max_guide_runs=max_guide_runs, max_rounds=max_rounds,
@@ -113,7 +115,7 @@ def refine(guide, evidence, output, solve, *, max_guide_runs=5, max_rounds=10,
         return report
 
     def evaluate(text, origin):
-        text = canonical_tree(anchored_tree(text, original.tips))
+        text = canonical_tree(anchored_tree(text, original.tips, anchor_outgroup=anchor_outgroup))
         if text in seen or len(trials) >= max_guide_runs:
             return None
         seen.add(text)
@@ -156,7 +158,7 @@ def refine(guide, evidence, output, solve, *, max_guide_runs=5, max_rounds=10,
             stop_reason = 'max_guide_runs'
             break
         improved = None
-        for text in switching_guides(current['network'], current['guide']):
+        for text in switching_guides(current['network'], current['guide'], anchor_outgroup=anchor_outgroup):
             if len(trials) >= max_guide_runs:
                 break
             candidate = evaluate(text, dict(kind='switching', parent=current['index'], round=round_index))

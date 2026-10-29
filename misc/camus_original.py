@@ -18,7 +18,9 @@ def parse_arguments():
     parser.add_argument('--gene-trees', type=Path, required=True,
                         help='Gene trees, one Newick per line')
     parser.add_argument('--starting-tree', type=Path, required=True,
-                        help='Binary guide Newick with OUT as a root child')
+                        help='Binary guide Newick on the gene-tree taxa')
+    parser.add_argument('--guide-rooting',choices=('outgroup','supplied'),default='outgroup',
+                        help='Use a known OUT root or preserve the supplied root and names (default: outgroup)')
     parser.add_argument('--output-directory', type=Path, required=True,
                         help='Fresh directory for network.nwk, the full candidate curve, and logs')
     parser.add_argument('--threads', type=int, default=1,
@@ -35,6 +37,7 @@ def run_camus(args):
         '--method', 'orig',
         '--genes', str(args.gene_trees),
         '--guide', str(args.starting_tree),
+        '--guide-rooting',args.guide_rooting,
         '--out', str(args.output_directory),
         '--threads', str(args.threads),
         '--timeout', str(args.timeout),

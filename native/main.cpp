@@ -121,7 +121,8 @@ template<class Value>void run(const Options& o,Log& log){
     log.message("reading quartet evidence");
     Evidence<Value> evidence=read_evidence<Value>(o.input,tree,o.grouped,o.signed_weights);
     log.finish("counting_or_evidence_reading");
-    bool total_objective=o.signed_weights&&o.anchored;
+    // Guide totals are needed for iterative comparisons with either rooting mode.
+    bool total_objective=o.signed_weights;
     evidence.filter(tree,o.mode,o.threshold,total_objective);
     log.message(std::to_string(evidence.size())+" quartet topologies not in the constraint tree");
     log.finish("filtering");

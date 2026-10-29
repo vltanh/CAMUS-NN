@@ -46,7 +46,9 @@ def parse_arguments():
                         help='Required with --starting-tree: exact or 3-fix-1-alter ToB search')
     parser.add_argument('--tob-qmc', type=Path, default=ROOT / 'vendor/TREE-QMC/build/tree-qmc',
                         help='TOB-QMC executable (default: vendor/TREE-QMC/build/tree-qmc)')
-    parser.add_argument('--outgroup', default='OUT', help='ToB rooting taxon (default: OUT)')
+    parser.add_argument('--outgroup', help='Known ToB rooting taxon (default: no explicit root)')
+    parser.add_argument('--rooted',action='store_true',
+                        help='Treat the ToB root as known when resolving it (default: unrooted)')
     parser.add_argument('--alpha', type=float, default=1e-7,
                         help='ToB tree-test significance level (default: 1e-7)')
     parser.add_argument('--beta', type=float, default=0.95,
@@ -91,11 +93,12 @@ def estimate_tree_of_blobs(args, output):
         '--beta', str(args.beta),
         '--polyseed', str(args.polytomy_seed),
         '--cutseed', str(args.maxcut_seed),
-        '--root', args.outgroup,
         '--blobsearchonly', str(args.starting_tree),
         '-i', str(args.gene_trees),
         '-o', str(tob),
     ]
+    if args.outgroup:
+        command += ['--root',args.outgroup]
     if args.tob_search == 'exhaustive':
         command += ['--iter_limit_blob', '0']
     else:
@@ -107,7 +110,7 @@ def estimate_tree_of_blobs(args, output):
 
 
 def resolve_tree_of_blobs(args, tob, output):
-    """Resolve the rooted ToB with the recorded BROOQS settings."""
+    """Resolve the ToB; constrain its root only when explicitly requested."""
     network = output / 'network.nwk'
     command = [
         sys.executable, str(args.brooqs_script),
@@ -115,9 +118,10 @@ def resolve_tree_of_blobs(args, tob, output):
         '-t', str(tob),
         '-o', str(network),
         '--seed', str(args.seed),
-        '--rooted',
         '--min-blob-size', '4',
     ]
+    if args.rooted:
+        command.append('--rooted')
     with (output / 'brooqs.log').open('w') as log:
         subprocess.run(command, cwd=output, stdout=log, stderr=subprocess.STDOUT, check=True)
     if not network.read_text().strip():

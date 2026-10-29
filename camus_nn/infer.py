@@ -5,28 +5,30 @@ import csv
 import json
 import math
 import os
-from importlib.metadata import distribution, PackageNotFoundError
+from importlib.metadata import distributions
 from pathlib import Path
 import signal
 import subprocess
 import sys
 import time
 
-from .io import save
+from .io import digest, save
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = Path(__file__).resolve().parent
 DEFAULT_MODEL = PACKAGE / 'models/all-frequency.json'
 if not DEFAULT_MODEL.is_file():
     DEFAULT_MODEL = ROOT / 'models/all-frequency.json'
-DEFAULT_BIN_DIR = PACKAGE / 'bin'
-if not (DEFAULT_BIN_DIR / 'camus-native').is_file():
-    DEFAULT_BIN_DIR = ROOT / 'build'
-if not (DEFAULT_BIN_DIR / 'camus-native').is_file():
-    try:
-        DEFAULT_BIN_DIR = Path(distribution('camus-nn').locate_file('camus_nn/bin'))
-    except PackageNotFoundError:
-        pass
+def binary_directory():
+    """Prefer installed programs over a possibly stale source-tree build."""
+    candidates=[PACKAGE/'bin']
+    candidates.extend(Path(dist.locate_file('camus_nn/bin')) for dist in distributions(name='camus-nn'))
+    candidates.append(ROOT/'build')
+    return next((p for p in candidates if all((p/name).is_file() for name in ('camus-native','camus-count'))),
+                PACKAGE/'bin')
+
+
+DEFAULT_BIN_DIR = binary_directory()
 
 
 def choose(path, method, *, iterative=False):
@@ -48,7 +50,8 @@ def worker(output):
 
     config = json.loads((output / 'tmp/config.json').read_text())
     files = config['files']
-    tree = anchored_tree(Path(files['guide']).read_text())
+    anchor_outgroup = config.get('guide_rooting','outgroup') != 'supplied'
+    tree = anchored_tree(Path(files['guide']).read_text(),anchor_outgroup=anchor_outgroup)
     # Normalize annotation-free topology once, preserving child encounter order.
     guide = output / 'guide.nwk'
     guide.write_text(tree.newick() + '\n')
@@ -100,10 +103,11 @@ def worker(output):
             if iterative and config['inner_solver'] == 'overall' and cap is None:
                 flags += ['--signed-unrestricted']
             else:
-                flags += (['--anchor-outgroup'] if iterative else []) + ['-signed-max-reticulations', str(-1 if cap is None else cap),
+                flags += (['--anchor-outgroup'] if iterative and anchor_outgroup else []) + ['-signed-max-reticulations', str(-1 if cap is None else cap),
                           '-signed-stop-on-plateau=' + ('false' if iterative and config['inner_solver'] == 'overall' else 'true')]
         command = [files['binary'], '-n', str(config['threads']), *flags,
                    '-o', str(directory / 'network'), str(current_guide), str(evidence)]
+        save(directory / 'command.json',dict(argv=command,guide_rooting=config['guide_rooting']))
         with (directory / 'native.log').open('w') as log:
             subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)
         result = choose(directory / 'network.csv', config['method'], iterative=iterative)
@@ -115,7 +119,7 @@ def worker(output):
     if config['iterate']:
         result, iteration = refine(guide.read_text(), evidence, output, solve,
             max_guide_runs=config['max_guide_runs'], max_rounds=config['max_rounds'],
-            search_cap=cap, inner_solver=config['inner_solver'])
+            search_cap=cap, inner_solver=config['inner_solver'],anchor_outgroup=anchor_outgroup)
         result['guide_runs'] = len(iteration['trials'])
         result['objective_kind'] = 'total_signed_displayed_quartet_score'
     else:
@@ -123,7 +127,8 @@ def worker(output):
         result['objective_kind'] = 'signed_quartet_gain' if config['method'] == 'lqw' else 'quartet_satisfied_percent'
     phases['native_search_and_iterations'] = time.monotonic() - start
     (output / 'network.nwk').write_text(result['network'] + '\n')
-    save(output / 'prediction.json', dict(**result, method=config['method'], sampler=config['sampler'],
+    save(output / 'prediction.json', dict(**result, case=config['case'],method=config['method'], sampler=config['sampler'],
+        guide_rooting=config['guide_rooting'],outgroup_anchored=bool(config['iterate'] and anchor_outgroup),
         search_cap=cap, quartet_groups=rows, model_used=config['method'] != 'orig',
         quartet_draws=sum(multiplicities.values()) if multiplicities is not None else rows,
         truth_used_for_inference=False, phases=phases))
@@ -135,7 +140,9 @@ def main():
         return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--genes', type=Path, required=True, help='Gene-tree file: one Newick per line')
-    parser.add_argument('--guide', type=Path, required=True, help='Binary guide Newick; OUT is a root child')
+    parser.add_argument('--guide', type=Path, required=True, help='Binary guide Newick on the gene-tree taxa')
+    parser.add_argument('--guide-rooting',choices=('outgroup','supplied'),default='outgroup',
+        help='outgroup requires OUT at the guide root; supplied preserves the root and labels (default: outgroup)')
     parser.add_argument('--out', type=Path, required=True, help='Fresh output directory; must not exist')
     parser.add_argument('--method', choices=('orig', 'lqf', 'lqw'), default='lqw', help='Original CAMUS or a learned method (default: lqw)')
     parser.add_argument('--model', type=Path, default=DEFAULT_MODEL, help='Trained model for lqf/lqw (default: bundled NN; unused by orig)')
@@ -160,8 +167,12 @@ def main():
         parser.error('Require positive budgets, nonnegative rounds and a timeout in (0, 86400]')
     if not args.iterate and args.inner_solver != 'per-k-stopping':
         parser.error('--inner-solver overall requires --iterate')
+    if args.guide_rooting=='supplied' and args.iterate and args.inner_solver!='per-k-stopping':
+        parser.error('Supplied-root iteration requires --inner-solver per-k-stopping')
     from .iterate import anchored_tree
-    anchored_tree(args.guide.read_text())
+    tree=anchored_tree(args.guide.read_text(),anchor_outgroup=args.guide_rooting=='outgroup')
+    if args.sampler=='rooted' and 'OUT' not in tree.tips:
+        parser.error('Rooted quartet sampling requires a taxon named OUT')
     inputs = dict(genes=args.genes, guide=args.guide,
                   binary=args.bin_dir / 'camus-native', counter=args.bin_dir / 'camus-count')
     if args.method != 'orig':
@@ -173,7 +184,11 @@ def main():
     config = {k: v for k, v in vars(args).items() if not isinstance(v, Path)}
     config.update(files=files)
     save(output / 'tmp/config.json', config)
-    env = dict(os.environ, TMPDIR=str(output / 'tmp'), PYTHONDONTWRITEBYTECODE='1',
+    save(output / 'run.json',dict(schema='camus-nn-run/v1',config=config,
+        inputs={name:dict(path=path,sha256=digest(path)) for name,path in files.items()},
+        python=sys.version,argv=sys.argv[1:],inference_state_reused=False))
+    env = dict(os.environ, TMPDIR=str(output / 'tmp'),TMP=str(output/'tmp'),TEMP=str(output/'tmp'),
+        XDG_CACHE_HOME=str(output/'tmp/cache'),PYTHONDONTWRITEBYTECODE='1',
         OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1', MKL_NUM_THREADS='1')
     began = time.monotonic()
     process = None
