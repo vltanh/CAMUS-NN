@@ -107,7 +107,7 @@ establish a biological root. The same rooting flag works with `--iterate`.
 
 All uses every quartet. Rooted uses every quartet containing `OUT` once.
 Uniform samples globally; EU and EW sample around guide edges. Repeated draws
-retain their multiplicity. See the [full inference reference](docs/reference.md#inference)
+retain their multiplicity. See the [full inference reference](docs/inference.md)
 for sampling, memory, and search details, or run `camus-nn --help`.
 
 ### Outputs
@@ -146,9 +146,11 @@ raw count. Softwired clusters come from displayed trees; hardwired clusters
 are descendant leaf sets in the complete network. Both omit trivial clusters
 and count duplicate clusters once.
 
-By default, evaluation orients clusters away from `OUT`. Use `--outgroup LABEL`
-for another reference taxon, or `--rooted` to compare the supplied roots.
-See [evaluation details and the Python API](docs/reference.md#network-evaluation)
+Both SW and HWCD support two comparison modes: orient clusters away from
+`OUT` (the default, or another taxon with `--outgroup LABEL`), or use the
+supplied network roots with `--rooted`. HWCD is a raw count; the additional
+`hardwired_error` field is a normalized rate, not HWCD.
+See [evaluation details and the Python API](docs/evaluation.md)
 for exact definitions and extraction limits.
 
 ## Training and preprocessing
@@ -191,8 +193,8 @@ does not recreate the bundled model's full training cohort.
 
 Use `--model ../camus-results/training/model.json` for inference with the new
 model. Training uses seed `42` and eight hidden units by default. Each network
-receives equal total weight. See [training options](docs/reference.md#training)
-and [input formats](docs/reference.md#input-formats) for the CSV schema,
+receives equal total weight. See [training options](docs/training.md#fitting)
+and [input formats](docs/training.md#input-formats) for the CSV schema,
 labeling rules, optimizer, and reproducibility settings.
 
 ## Reproducibility and tests
@@ -207,7 +209,7 @@ python scripts/check_reproducibility.py --out ../camus-results/reproducibility
 This covers Original CAMUS, LQF, LQW, iteration, and supplied-root inference.
 With the training extra installed, add `--training` to check repeated fitting
 and agreement between CSV and direct training. Refits can depend on CPU math
-libraries; see [reproducibility details](docs/reference.md#reproducibility).
+libraries; see [reproducibility details](docs/training.md#reproducible-fits).
 
 Run the tests with the training extra installed:
 
@@ -218,8 +220,9 @@ python -m unittest discover -s tests -v
 ## Other methods and reference
 
 The [misc guide](misc/README.md) covers runners for original CAMUS, BROOQS,
-SNaQ, and PhyloNet-MPL. The [command reference](docs/reference.md) contains the
-complete CLI options, metric definitions, and training formats.
+SNaQ, and PhyloNet-MPL. Full documentation is split into
+[inference](docs/inference.md), [evaluation](docs/evaluation.md), and
+[training](docs/training.md).
 
 ## License and acknowledgments
 

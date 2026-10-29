@@ -43,7 +43,7 @@ quartet, filter mode 2, and threshold 0.5. The NN is unused. The runner calls
 </details>
 
 For All, Rooted, Uniform, EU, or EW quartet sampling, use the package CLI's
-`--sampler` argument with `--method orig`; see the [inference options](../docs/reference.md#inference).
+`--sampler` argument with `--method orig`; see the [inference options](../docs/inference.md).
 
 ## BROOQS and TOB-QMC
 
