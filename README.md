@@ -153,6 +153,18 @@ supplied network roots with `--rooted`. HWCD is a raw count; the additional
 See [evaluation details and the Python API](docs/evaluation.md)
 for exact definitions and extraction limits.
 
+The Python cluster-set implementation is the default. Optional upstream
+implementations are available too:
+
+| Metric selector | Implementation | Root handling |
+| --- | --- | --- |
+| `--metric phylonet-sw` | PhyloNet 3.8.2 SW FN/FP/error | Supplied roots |
+| `--metric phylonetworks-hwcd` | PhyloNetworks 1.4.0 HWCD | Semidirected; add `--rooted` for supplied roots |
+
+Java or Julia is needed only for the selected external backend. These backends
+require `--output` and record their version, rooting convention, and logs.
+See [backend setup and examples](docs/evaluation.md#phylonet-sw-backend).
+
 ## Training and preprocessing
 
 Install the training extra:

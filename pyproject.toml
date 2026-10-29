@@ -24,4 +24,4 @@ camus-nn-evaluate = "camus_nn.evaluate:main"
 packages = ["camus_nn"]
 
 [tool.setuptools.package-data]
-camus_nn = ["bin/*", "models/*.json", "licenses/*"]
+camus_nn = ["bin/*", "models/*.json", "licenses/*", "*.jl"]

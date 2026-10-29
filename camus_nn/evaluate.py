@@ -258,20 +258,42 @@ def _positive(value):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Compare two saved networks using exact SW cluster rates and raw HWCD.")
+    parser = argparse.ArgumentParser(description="Compare saved networks with Python cluster metrics, PhyloNet SW, or PhyloNetworks HWCD.")
     parser.add_argument("--truth", required=True, type=Path, help="True network, one extended-Newick record")
     parser.add_argument("--estimate", required=True, type=Path, help="Estimated network, one extended-Newick record")
-    parser.add_argument("--metric", choices=("both", "softwired", "hardwired"), default="both")
+    parser.add_argument("--metric", choices=("both", "softwired", "hardwired", "phylonet-sw", "phylonetworks-hwcd"), default="both")
     rooting = parser.add_mutually_exclusive_group()
-    rooting.add_argument("--outgroup", default="OUT", help="Orient clusters away from this taxon (default: OUT)")
-    rooting.add_argument("--rooted", action="store_true", help="Use the roots supplied in Newick instead of OUT orientation")
-    parser.add_argument("--max-switchings", type=_positive, default=65536,
-        help="Exact local switching-configuration budget per network for SW (default: 65536); never approximates")
+    rooting.add_argument("--outgroup", help="Python metrics: orient clusters away from this taxon (default: OUT); unavailable for external backends")
+    rooting.add_argument("--rooted", action="store_true", help="Use supplied roots; PhyloNetworks otherwise uses semidirected comparison; PhyloNet always uses supplied roots")
+    parser.add_argument("--max-switchings", type=_positive,
+        help="Python SW: exact local configuration budget per network (default: 65536)")
     parser.add_argument("--output", type=Path, help="Also save JSON to this new file; existing files are never overwritten")
+    sw = parser.add_argument_group("optional PhyloNet SW backend")
+    sw.add_argument("--sw-jar", type=Path, help="Pinned PhyloNet 3.8.2 JAR (default: vendor/PhyloNet-3.8.2.jar)")
+    sw.add_argument("--sw-java", help="Java executable (default: java on PATH)")
+    sw.add_argument("--sw-heap", help="Java heap, such as 2g (default: 2g)")
+    sw.add_argument("--sw-timeout", type=float, help="Seconds per comparison (default: 3600)")
+    hw = parser.add_argument_group("optional PhyloNetworks HWCD backend")
+    hw.add_argument("--hwcd-julia", help="Julia executable (default: julia on PATH)")
+    hw.add_argument("--hwcd-project", type=Path, help="Existing Julia environment with PhyloNetworks 1.4.0 (default: active Julia environment)")
+    hw.add_argument("--hwcd-depot", type=Path, help="Existing Julia package depot (default: Julia's configured depot)")
+    hw.add_argument("--hwcd-timeout", type=float, help="Seconds per comparison (default: 3600)")
     args = parser.parse_args(argv)
     if args.output and args.output.exists():
         parser.error("output already exists: " + str(args.output))
-    outgroup = None if args.rooted else args.outgroup
+    external = args.metric in ("phylonet-sw", "phylonetworks-hwcd")
+    if external and args.output is None:
+        parser.error("External backends require --output to retain scoring logs and provenance beside the JSON")
+    if external and args.outgroup is not None:
+        parser.error("--outgroup applies only to Python cluster metrics; external backends use their own rooting convention")
+    if external and args.max_switchings is not None:
+        parser.error("--max-switchings applies only to Python softwired extraction")
+    if args.metric != "phylonet-sw" and any(v is not None for v in (args.sw_jar, args.sw_java, args.sw_heap, args.sw_timeout)):
+        parser.error("--sw-* options require --metric phylonet-sw")
+    if args.metric != "phylonetworks-hwcd" and any(v is not None for v in (args.hwcd_julia, args.hwcd_project, args.hwcd_depot, args.hwcd_timeout)):
+        parser.error("--hwcd-* options require --metric phylonetworks-hwcd")
+    outgroup = None if args.rooted or external else ("OUT" if args.outgroup is None else args.outgroup)
+    cap = None if external else (65536 if args.max_switchings is None else args.max_switchings)
     try:
         inputs = {}
         texts = {}
@@ -280,11 +302,36 @@ def main(argv=None):
             raw = path.read_bytes()
             texts[label] = raw.decode("utf-8")
             inputs[label] = dict(path=str(path), sha256=hashlib.sha256(raw).hexdigest())
-        scores = evaluate_networks(texts["truth"], texts["estimate"], outgroup=outgroup,
-            cap=args.max_switchings, metric=args.metric)
+        if args.metric == "phylonet-sw":
+            from .phylonet_sw import PhyloNetSW, METRIC_VERSION
+            workdir = args.output.resolve().parent / (args.output.stem + "-phylonet-sw")
+            with PhyloNetSW(workdir=workdir, jar=args.sw_jar, java=args.sw_java,
+                            heap="2g" if args.sw_heap is None else args.sw_heap,
+                            timeout=3600 if args.sw_timeout is None else args.sw_timeout) as scorer:
+                scores = scorer.score(texts["truth"], texts["estimate"])
+            version = METRIC_VERSION
+            hwcd_units = None
+        elif args.metric == "phylonetworks-hwcd":
+            from .phylonetworks_hwcd import PhyloNetworksHWCD, METRIC_VERSIONS
+            workdir = args.output.resolve().parent / (args.output.stem + "-hwcd")
+            with PhyloNetworksHWCD(workdir=workdir, julia=args.hwcd_julia,
+                                  julia_project=args.hwcd_project, depot=args.hwcd_depot,
+                                  timeout=3600 if args.hwcd_timeout is None else args.hwcd_timeout) as scorer:
+                scores = scorer.score(texts["truth"], texts["estimate"], rooted=args.rooted)
+            version = METRIC_VERSIONS[args.rooted]
+            hwcd_units = "raw edge-typed cluster differences with multiplicity"
+        else:
+            scores = evaluate_networks(texts["truth"], texts["estimate"], outgroup=outgroup,
+                                       cap=cap, metric=args.metric)
+            version = "python-cluster-set/v1-" + ("rooted" if outgroup is None else "reference-taxon")
+            hwcd_units = "raw distinct-cluster differences"
+        parameters = (json.loads(scores.pop("metric_parameters_json")) if external else
+                      dict(implementation="camus_nn.evaluate", outgroup=outgroup,
+                           source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()))
         result = dict(schema="camus-nn-evaluation/v1", inputs=inputs, metric=args.metric,
-            outgroup=outgroup, max_switchings=args.max_switchings,
-            rate_units="fraction", hwcd_units="raw distinct-cluster differences",
+            metric_version=version, metric_parameters=parameters,
+            outgroup=outgroup, max_switchings=cap,
+            rate_units=None if args.metric == "phylonetworks-hwcd" else "fraction", hwcd_units=hwcd_units,
             root_filter_applied=False, scores=scores)
         rendered = json.dumps(result, indent=2, allow_nan=False) + "\n"
         if args.output:
