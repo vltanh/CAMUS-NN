@@ -8,19 +8,13 @@ Inputs are gene trees (one complete Newick per line) and a supplied starting
 tree in Newick, with matching taxon labels. The examples use the included
 IQ-TREE gene trees and ASTRAL guide. Choose a new output directory for every run.
 
-```bash
-RESULTS=../camus-nn-results
-mkdir -p "$RESULTS/tmp"
-export TMPDIR="$(cd "$RESULTS/tmp" && pwd)"
-```
-
 ## Original CAMUS
 
 ```bash
 python misc/camus_original.py \
   --gene-trees examples/validation/genes.nwk \
   --starting-tree examples/validation/guide.nwk \
-  --output-directory "$RESULTS/camus-original"
+  --output-directory ../camus-results/camus-original
 ```
 
 This runs original CAMUS with the included C++ implementation, using every
@@ -34,7 +28,7 @@ quartet, filter mode 2, and threshold 0.5. The NN is unused. The runner calls
 | --- | --- |
 | `--gene-trees FILE` | Required. Gene trees, one Newick per line. |
 | `--starting-tree FILE` | Required. Binary guide Newick on the gene-tree taxa. |
-| `--guide-rooting {outgroup,supplied}` | Default: `outgroup`, with `OUT` at the guide root. `supplied` preserves the root and names. |
+| `--guide-rooting {outgroup,supplied}` | Default: `outgroup`, with `OUT` at the guide root. `supplied` starts from the guide's represented root, keeps the taxon names, and applies no outgroup constraint. |
 | `--output-directory DIR` | Required. Fresh output directory. |
 
 <details>
@@ -49,7 +43,7 @@ quartet, filter mode 2, and threshold 0.5. The NN is unused. The runner calls
 </details>
 
 For All, Rooted, Uniform, EU, or EW quartet sampling, use the package CLI's
-`--sampler` argument with `--method orig`; see the [inference options](../README.md#inference).
+`--sampler` argument with `--method orig`; see the [inference options](../docs/reference.md#inference).
 
 ## BROOQS and TOB-QMC
 
@@ -61,20 +55,20 @@ python misc/brooqs.py \
   --gene-trees examples/validation/genes.nwk \
   --starting-tree examples/validation/guide.nwk \
   --outgroup OUT --rooted --tob-search 3f1a \
-  --output-directory "$RESULTS/brooqs"
+  --output-directory ../camus-results/brooqs
 
 # Exhaustive ToB search instead of 3-fix-1-alter search.
 python misc/brooqs.py \
   --gene-trees examples/validation/genes.nwk \
   --starting-tree examples/validation/guide.nwk \
   --outgroup OUT --rooted --tob-search exhaustive \
-  --output-directory "$RESULTS/brooqs-exhaustive"
+  --output-directory ../camus-results/brooqs-exhaustive
 
 # Resolve an existing ToB without repeating its estimation.
 python misc/brooqs.py \
   --gene-trees examples/validation/genes.nwk \
-  --tree-of-blobs "$RESULTS/brooqs/tree-of-blobs.nwk" --rooted \
-  --output-directory "$RESULTS/brooqs-resolve"
+  --tree-of-blobs ../camus-results/brooqs/tree-of-blobs.nwk --rooted \
+  --output-directory ../camus-results/brooqs-resolve
 ```
 
 The runner uses TREE-QMC 4.1.5 revision `53b15e5c` and BROOQS revision
@@ -88,7 +82,7 @@ root should constrain BROOQS resolution. The examples above use the known
 
 ```bash
 python misc/brooqs.py --gene-trees gene-trees.nwk --starting-tree astral.nwk \
-  --tob-search exhaustive --output-directory "$RESULTS/brooqs-astral"
+  --tob-search exhaustive --output-directory ../camus-results/brooqs-astral
 ```
 
 **Inputs, output, and search mode**
@@ -138,7 +132,7 @@ python misc/snaq.py \
   --starting-tree examples/test/guide.nwk \
   --max-reticulations 1 --runs 32 --seed 42 \
   --search-workers 8 --threads 4 --max-failures 75 \
-  --output-directory "$RESULTS/snaq"
+  --output-directory ../camus-results/snaq
 ```
 
 Use Julia 1.11.6 with the included environment, which locks SNaQ 1.2.1,
@@ -192,7 +186,7 @@ python misc/phylonet_mpl.py \
   --gene-trees examples/test/genes.nwk \
   --starting-tree examples/test/guide.nwk \
   --max-reticulations 1 --runs 10 --seed 42 \
-  --threads 8 --heap 6g --output-directory "$RESULTS/phylonet-mpl"
+  --threads 8 --heap 6g --output-directory ../camus-results/phylonet-mpl
 ```
 
 This runs PhyloNet 3.8.2 with OpenJDK 17 using native `InferNetwork_MPL`:

@@ -1,4 +1,5 @@
 include LICENSE
+recursive-include docs *.md
 recursive-include models *.json
 recursive-include native *.cpp *.hpp LICENSE *-LICENSE
 recursive-include examples *.csv *.nwk *.json
