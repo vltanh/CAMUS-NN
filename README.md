@@ -1,21 +1,17 @@
 # CAMUS-NN
 
-CAMUS-NN reconstructs phylogenetic networks from gene trees that disagree.
-Starting from a guide tree, it adds reticulation edges to represent histories
-such as hybridization.
+CAMUS-NN reconstructs level-1 phylogenetic networks from discordant gene trees.
+Starting from a rooted guide tree, it adds reticulation edges to optimize  a
+weighted quartet score.
 
-Give it **gene trees and a binary guide tree on the same taxa** (for example,
-an ASTRAL tree). It returns an **inferred network in extended Newick**, candidate
-networks and scores, and logs recording the run.
+Give it gene trees, a binary guide tree on the same taxa, and an outgroup to
+root these trees. It returns an **inferred level-1 network**.
 
-- **Original CAMUS** uses frequency thresholds to select quartet signals.
-- **CAMUS-LQF** uses a trained neural network to filter those signals.
-- **CAMUS-LQW** uses the network's predictions as quartet weights.
-- **CAMUS-LQW + iteration** refines the guide and reruns LQW, reusing the same
-  quartet evidence for up to five solves by default.
-
-LQF and LQW share the included trained model. You can also train a new model
-from networks with known histories.
+- **Original CAMUS** uses frequency thresholds to filter quartets.
+- **CAMUS-LQF** (Learned Quartet Filtering) uses a learned neural network to filter quartets.
+- **CAMUS-LQW** (Learned Quartet Weighting) uses the network's predictions as quartet weights.
+- **CAMUS-LQW + iteration** modifies the guide with SPR moves and reruns LQW, reusing the same
+  quartet evidence.
 
 ## Install
 
